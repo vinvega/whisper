@@ -45,13 +45,26 @@ System Access API already used in prior smoke tests.
     _Reqs: 2.6, 3.3, 6.3_
 
 - [ ] 3. Media attachments
-  - [ ] 3.1 Implement add-media: write file to `media/` with owner-scoped name,
-    insert a relative `![alt](media/..)` reference into the post body. Mock-FS test
-    for write + reference insertion.
-    _Reqs: 5.1, 5.2, 5.3_
+  - [ ] 3.1 Implement add-media: write file to `media/` with owner-scoped name.
+    Mock-FS test for owner-scoped write.
+    _Reqs: 5.1, 5.2_
   - [ ] 3.2 Enforce owner-only media writes/deletes; add a size-threshold warning.
     Test ownership guard and warning trigger.
     _Reqs: 5.4, 5.6_
+  - [ ] 3.3 Implement `listMedia()` enumerating all files in `media/` (any author)
+    with thumbnails for the picker. Mock-FS test listing multi-author media.
+    _Reqs: 5a.3_
+  - [ ] 3.4 Implement caret tracking for the post-body editor: save the last
+    selection range on `selectionchange`/blur; `insertAtCaret(md)` that restores it
+    and splices, with end-of-body fallback when no range exists. Unit/DOM test both
+    paths.
+    _Reqs: 5a.4, 5a.5_
+  - [ ] 3.5 Implement the **Insert picture** action: choose Upload-new vs
+    Choose-existing; build the `![alt](media/<file>)` reference (alt defaults to
+    base name, editable) and insert at caret. Verify existing-image path inserts a
+    reference WITHOUT copying the file, and referencing a co-author's media does not
+    write their file. Mock-FS + DOM tests.
+    _Reqs: 5a.1, 5a.2, 5a.6, 5a.7, 5a.8, 5.3_
 
 - [ ] 4. Collaboration UI (opt-in mode)
   - [ ] 4.1 Add an explicit Private ↔ Collaboration mode switch; private notes
@@ -62,8 +75,10 @@ System Access API already used in prior smoke tests.
     posts.
     _Reqs: 2.5, 2.6, 4.4, 6.2_
   - [ ] 4.3 Post editor: create/edit a post via typing and via existing voice
-    transcription (Live + stop, with non-speech filtering).
-    _Reqs: 2.3, 2.4_
+    transcription (Live + stop, with non-speech filtering). Include the **Insert
+    picture** button (wires to tasks 3.3-3.5) and render inserted images in the
+    editor preview.
+    _Reqs: 2.3, 2.4, 5a.1_
   - [ ] 4.4 Assembled view: read-only rendered markdown of `assemble(posts)`,
     refreshed on scan.
     _Reqs: 4.3_

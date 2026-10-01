@@ -210,8 +210,56 @@ attach), markdown rendering for the assembled preview.
 - **Post list**: shows all posts with author attribution; the user's own posts are
   editable/reorderable/deletable; others' are read-only.
 - **Assembled view**: read-only rendered document; export button.
-- **Media attach**: add image to a post; inserts a relative markdown reference.
+- **Insert picture**: button in the post editor; see §8.1.
 - **Conflict badges** on the user's own posts (reusing the existing pattern).
+
+### 8.1 Insert-picture flow
+
+Goal: add a new image or reuse an existing one, inserting the correct markdown at
+the caret (Req 5a).
+
+**Caret tracking.** The post body editor is a `contenteditable`. Programmatic
+updates (voice transcription, inserts) and focus changes can lose the caret, so we
+persist the last-known selection:
+
+```
+on 'selectionchange' / editor blur:
+    if selection is inside the post-body editor:
+        savedRange = selection.getRangeAt(0).cloneRange()
+```
+
+On insert, restore `savedRange` (or fall back to end-of-body if none) and splice the
+markdown there.
+
+**Listing the media library (Req 5a.3).** Enumerate `media/` in the story folder and
+list all files (any author's), each with a small thumbnail (object URL from the
+file). This is a read listing; it does not imply write/delete rights over others'
+files.
+
+**Insert flow:**
+
+```
+insertPicture():
+    choice = ask user: "Upload new" | "Choose existing"
+    if Upload new:
+        file = file picker (image/*)
+        warn if over size threshold (Req 5.6)
+        name = mediaFileName(penSlug, newId, file.name)   # owner-scoped
+        write file to media/<name>                        # owner write only
+    else: # Choose existing
+        name = user picks from media/ listing (may be a co-author's file; no copy)
+    alt = prompt (default = file base name)                # Req 5a.6
+    md = `![${alt}](media/${name})`
+    insertAtCaret(editorBody, md, savedRange)              # Req 5a.4 / fallback 5a.5
+    # editing the body marks the post dirty -> writeOwnPost (the POST is owned;
+    # referencing a co-author's media does not write their file) (Req 5a.7/5a.8)
+```
+
+Key invariants:
+- Choosing an existing image inserts a reference only — **no file copy** (5a.7).
+- Only the post file (owned) is written; referenced media owned by others is never
+  modified (5a.8).
+- `insertAtCaret` uses the saved range; absent one, appends to the body (5a.5).
 
 ## 9. Edge cases & decisions
 

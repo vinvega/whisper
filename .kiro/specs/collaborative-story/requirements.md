@@ -138,6 +138,35 @@ story, so that the document can include more than text.
 
 ---
 
+## Requirement 5a: Insert picture (editor action)
+
+**User story:** As a contributor editing a post, I want an "Insert picture" button
+that lets me add a new image or reuse an existing one, and drops the correct
+markdown at my cursor, so that embedding images is quick and I don't have to type
+markdown or re-upload images that already exist.
+
+### Acceptance criteria
+
+1. The post editor SHALL provide an **Insert picture** action.
+2. Invoking it SHALL offer two sources:
+   1. **Upload new** — choose an image file from the device; the system stores it in
+      `media/` (owner-scoped name per Req 5.2) and references it.
+   2. **Choose existing** — pick from the story's existing media library.
+3. The media library SHALL list media files already present in the shared folder,
+   including those added by co-authors (so any image in the story can be referenced).
+4. WHEN the user confirms a selection THEN the system SHALL insert a markdown image
+   reference (`![alt](media/<file>)`) at the current cursor position in the post
+   body, not merely append it.
+5. IF the editor has no active caret (e.g. it was never focused) THEN the system
+   SHALL insert at the end of the post body as a fallback.
+6. The system SHALL let the user provide/edit the alt text for the inserted image
+   (defaulting to the file's base name).
+7. Referencing an existing image SHALL NOT duplicate the file in `media/`.
+8. Deleting a media file SHALL remain owner-only (Req 5.4); referencing a
+   co-author's image does not grant delete rights.
+
+---
+
 ## Requirement 6: External-change detection (safety)
 
 **User story:** As a contributor, I want to be warned rather than silently
