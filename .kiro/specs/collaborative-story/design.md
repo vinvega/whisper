@@ -140,6 +140,52 @@ function assemble(posts):
 
 - Pure function of the file set → identical output for every collaborator.
 - Rendered as read-only; never edited directly.
+- `assemble()` is the single source of the combined document, used by the in-app
+  assembled view, the `story.md` build, and local export alike.
+
+### 5.1a Building the combined story (`story.md`) — Req 7
+
+The combined document is a **derived output**. "Building" means running `assemble()`
+over the posts the user currently has loaded and writing the result to `story.md`.
+
+```
+buildCombinedStory(reason):            # reason = "manual" | "idle"
+    md = assemble(posts)               # over currently-synced posts in memory
+    if md === lastBuiltContent: return # skip identical rebuilds (Req 7.3)
+    write md to <folder>/story.md      # OUTPUT; NOT via writeOwnPost / no conflict/.bak
+    lastBuiltContent = md
+    show brief "Combined story updated" status
+```
+
+Key points:
+- Assembles from the **in-memory, currently-synced** posts, so the output reflects
+  the user's current view (Req 7.2). It does NOT force a refresh first; the UI tells
+  the user to Refresh if they want co-authors' latest included.
+- `story.md` bypasses the owned-file machinery entirely: it is written directly,
+  with **no** external-change detection, **no** `.bak`, and **no** single-writer
+  check (Req 7.5, 7.6). It is pure output; last-writer-wins is acceptable because
+  the posts remain the source of truth and the content is deterministic.
+- `lastBuiltContent` guards against rewriting an identical file (Req 7.3), which
+  also prevents the idle task from needlessly churning Drive syncs.
+
+**Idle auto-build (Req 7.3-7.4):**
+
+```
+idle timer (default 30s):
+    reset on: typing, post edit, voice capture, navigation, refresh
+    on fire (user idle):
+        if connected to a story folder:
+            buildCombinedStory("idle")   # no-op if nothing changed
+```
+
+- The timer is reset by the same activity signals that already drive the editor; a
+  single debounced "activity" hook resets it.
+- The idle build is best-effort and silent on no-change; it never blocks editing,
+  recording, or refresh (Req 7.9).
+
+**Local export (Req 7.8):** the same `assemble()` output can be offered as a `.md`
+download (reusing the existing export/download mechanism), independent of the folder
+`story.md`.
 
 ### 5.2 Scan + refresh model (manual primary, notify-only background)
 
@@ -250,7 +296,10 @@ attach), markdown rendering for the assembled preview.
 - **Refresh control + "updates available" indicator**: a manual Refresh button; the
   background check surfaces an unobtrusive "N updates — Refresh" badge that applies
   changes only when clicked (§5.2, Req 3a).
-- **Assembled view**: read-only rendered document; export button.
+- **Assembled view**: read-only rendered document.
+- **Build combined story**: button to write `story.md` from the current view (§5.1a);
+  plus a local `.md` export. An idle timer also rebuilds `story.md` after ~30s of
+  inactivity.
 - **Insert picture**: button in the post editor; see §8.1.
 - **Conflict badges** on the user's own posts (reusing the existing pattern).
 

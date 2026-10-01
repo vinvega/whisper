@@ -92,11 +92,20 @@ System Access API already used in prior smoke tests.
     refreshed on scan.
     _Reqs: 4.3_
 
-- [ ] 5. Export
-  - [ ] 5.1 Export assembled document as a single `.md` with valid relative media
-    paths. Optionally write `story.md` into the folder as regenerated output (never
-    read back as source).
-    _Reqs: 7.1, 7.2, 7.3, 5.5_
+- [ ] 5. Build combined story & export
+  - [ ] 5.1 Implement `buildCombinedStory()`: assemble currently-synced posts and
+    write `story.md` directly (no owned-file conflict/`.bak`/single-writer path);
+    skip if identical to the last build. Mock-FS tests: writes story.md, skips
+    identical rebuild, overwrites a co-author's story.md without conflict prompt.
+    _Reqs: 7.1, 7.2, 7.5, 7.6, 7.7_
+  - [ ] 5.2 Add the **Build combined story** button and a local `.md` download of
+    the same assembled output; valid relative media paths in both.
+    _Reqs: 7.1, 7.8, 5.5_
+  - [ ] 5.3 Idle auto-build: a ~30s inactivity timer (reset by typing/edit/voice/
+    nav/refresh) that calls `buildCombinedStory("idle")`; no-op on no change; never
+    blocks editing/recording/refresh. Test timer reset and that an idle fire with no
+    changes writes nothing.
+    _Reqs: 7.3, 7.4, 7.9_
 
 - [ ] 6. Integration, coexistence & docs
   - [ ] 6.1 End-to-end mock-FS test: two simulated authors write posts into one

@@ -221,18 +221,40 @@ clobbered when a file changes outside the app, so that no contribution is lost.
 
 ---
 
-## Requirement 7: Export
+## Requirement 7: Build the combined story
 
-**User story:** As a contributor, I want to export the assembled story, so that I
-can share or publish the finished document.
+**User story:** As a contributor, I want to build the combined story into a single
+file in the shared folder, so that anyone can read the whole assembled document
+outside the app (e.g. directly in Google Drive), and so it stays reasonably fresh
+while we write.
 
 ### Acceptance criteria
 
-1. The system SHALL export the assembled document as a single markdown file.
-2. The system SHOULD optionally write the assembled document to the shared folder
-   (e.g. `story.md`) as a regenerated OUTPUT, never read back as a source of truth.
-3. Exported media references SHALL remain valid relative to the exported document's
-   location.
+1. The system SHALL provide an explicit **Build combined story** button that any
+   user can press. Pressing it SHALL assemble the posts the user currently has
+   synced (loaded in their app) and write the result to `story.md` in the shared
+   folder.
+2. The combined output SHALL reflect **what that user currently has synced** — i.e.
+   their current loaded view — which depends on their last refresh. The UI SHALL
+   make this scope clear (building reflects your current view; press Refresh first
+   to include the latest from co-authors).
+3. The system SHALL, after a period of user inactivity (default ~30 seconds idle),
+   launch a background task that rebuilds `story.md` — but only IF the content has
+   changed since the last build (skip identical rebuilds).
+4. The idle timer SHALL reset on user activity (typing, editing, voice capture,
+   navigation) so the rebuild only fires once the user has genuinely paused.
+5. `story.md` SHALL be treated as **regenerated OUTPUT**, never read back as a source
+   of truth. Editing `story.md` by hand is not supported (it will be overwritten).
+6. Because `story.md` is fully derived and deterministic, it is EXEMPT from
+   single-writer discipline and from the conflict/`.bak` protection: any user may
+   overwrite it, and a concurrent rebuild by another user is an acceptable
+   last-writer-wins overwrite (no data is lost, since posts are the source of truth).
+7. Media references in `story.md` SHALL remain valid relative paths (e.g.
+   `media/<file>`) within the shared folder.
+8. The system SHALL also allow exporting/downloading the combined document locally
+   (a `.md` download) in addition to writing `story.md` into the folder.
+9. The background rebuild SHALL be lightweight and SHALL NOT interrupt editing,
+   recording, or refresh operations.
 
 ---
 
