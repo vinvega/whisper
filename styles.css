@@ -14,6 +14,11 @@
 
 * { box-sizing: border-box; }
 
+/* The HTML `hidden` attribute must win over explicit display rules (e.g.
+   .app-main/.collab-main use display:flex, which would otherwise override the
+   browser's default `[hidden] { display:none }` and keep hidden panels visible). */
+[hidden] { display: none !important; }
+
 html, body {
   margin: 0;
   padding: 0;
