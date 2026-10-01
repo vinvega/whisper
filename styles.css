@@ -146,6 +146,9 @@ select, .btn {
 }
 .icon-btn:hover { border-color: var(--accent); }
 
+.hamburger {
+  pointer-events: none; /* clicks always target the button, not the glyph */
+}
 .hamburger,
 .hamburger::before,
 .hamburger::after {

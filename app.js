@@ -458,7 +458,14 @@ function closeSidebar() {
   els.sidebarBackdrop.hidden = true;
 }
 
+let lastSidebarToggle = 0;
 function toggleSidebar() {
+  // Debounce: ignore a second trigger within a short window (guards against a
+  // click landing such that the event fires twice and the sidebar flickers).
+  const now = Date.now();
+  if (now - lastSidebarToggle < 250) return;
+  lastSidebarToggle = now;
+
   if (els.sidebar.classList.contains("collapsed")) openSidebar();
   else closeSidebar();
 }
@@ -659,7 +666,14 @@ async function runLiveWindow(isFinal) {
 
   try {
     const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
-    const audio = await blobToWhisperAudio(blob);
+    // Lenient decode: a mid-stream slice may not be decodable yet. If so, skip
+    // this pass and retry next tick (chunks keep accumulating).
+    const audio = await blobToWhisperAudio(blob, false);
+    if (!audio) {
+      liveInFlight = false;
+      if (!isFinal) setDot("ready");
+      return;
+    }
     const totalSec = audio.length / WHISPER_SAMPLE_RATE;
 
     const newSec = totalSec - processedSec;
@@ -776,11 +790,23 @@ function finishStop() {
 }
 
 // Decode compressed audio and resample to the mono 16 kHz Float32 Whisper needs.
-async function blobToWhisperAudio(blob) {
+// Decode compressed audio and resample to the mono 16 kHz Float32 Whisper needs.
+// `strict` (used for the final/stop transcription) rethrows decode failures so the
+// user sees them; otherwise (live windows) we return null so the caller can skip
+// a transient, undecodable mid-stream slice and retry on the next pass.
+async function blobToWhisperAudio(blob, strict = true) {
   const arrayBuffer = await blob.arrayBuffer();
   const AudioCtx = window.AudioContext || window.webkitAudioContext;
   const decodeCtx = new AudioCtx();
-  const decoded = await decodeCtx.decodeAudioData(arrayBuffer);
+
+  let decoded;
+  try {
+    decoded = await decodeCtx.decodeAudioData(arrayBuffer);
+  } catch (err) {
+    decodeCtx.close();
+    if (strict) throw err;
+    return null; // transient: an in-progress recording slice couldn't be decoded yet
+  }
   decodeCtx.close();
 
   // Resample to 16 kHz mono using an OfflineAudioContext.
