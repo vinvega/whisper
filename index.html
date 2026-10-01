@@ -25,6 +25,11 @@
         <option value="Xenova/whisper-base.en" selected>base.en (balanced)</option>
         <option value="Xenova/whisper-small.en">small.en (most accurate)</option>
       </select>
+      <label class="switch" title="Transcribe continuously as you speak (uses more CPU)">
+        <input type="checkbox" id="liveToggle" />
+        <span class="switch-track"><span class="switch-thumb"></span></span>
+        <span class="switch-label">Live</span>
+      </label>
       <button id="exportBtn" class="btn ghost" title="Download current note as .txt">Export</button>
       <button id="newBtn" class="btn ghost" title="Create a new note">New</button>
     </div>

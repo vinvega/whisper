@@ -5,6 +5,7 @@ transcribed **locally in the browser** with OpenAI's Whisper (via Transformers.j
 so after the first load there is no internet, no server, and no cost.
 
 - Record your voice, get text appended to an editable document
+- Two modes: transcribe once on Stop, or **Live** (text appears as you speak)
 - Edit and type by hand too
 - Keep multiple notes, selectable from a sidebar (create, rename, delete)
 - Search/filter notes and drag to reorder them
@@ -62,10 +63,30 @@ Use the dropdown in the header:
 
 If transcription feels slow on your Chromebook, switch to `tiny.en`.
 
+## Transcription modes
+
+Use the **Live** toggle in the header to choose how transcription happens:
+
+- **Live off (default):** you record, then transcription runs once when you click
+  **Stop**. Most reliable, lowest CPU use, best accuracy per recording.
+- **Live on:** text appears as you speak. The app re-transcribes the session
+  every few seconds and updates the editor (near-real-time, chunked).
+
+How Live works and its limits:
+
+- Whisper isn't a true word-by-word streaming model, so Live re-transcribes the
+  whole current session each pass. That keeps words from being clipped at chunk
+  boundaries, at the cost of more CPU.
+- Only one transcription runs at a time. If your Chromebook can't keep up, extra
+  passes are skipped rather than queued, so it degrades gracefully.
+- A single live session's audio is capped (about 90s is fed to the model) to stay
+  responsive; the committed text is kept, so longer dictation still works.
+- On modest hardware, use `tiny.en` with Live for the smoothest experience.
+- Avoid typing in the editor during a live session — the next pass rewrites the
+  in-progress text. Edit freely once you've stopped.
+
 ## Notes & limits
 
-- Transcription runs after you press **Stop** (record a chunk, then transcribe),
-  not live word-by-word. This keeps it reliable on modest hardware.
 - Models are English-only (`.en`). To support other languages, switch the model
   IDs in `app.js` to the multilingual variants (e.g. `Xenova/whisper-base`).
 - Everything stays on the device. Notes are saved in the browser's local storage
@@ -76,7 +97,8 @@ If transcription feels slow on your Chromebook, switch to `tiny.en`.
 - Open the sidebar with the menu button (top left). On narrow screens it slides
   over the editor; on wider screens it sits alongside.
 - **+ New** (sidebar) or **New** (header) creates a fresh note.
-- Click a note in the list to open it. The most recently edited note moves to the top.
+- Click a note in the list to open it. New notes appear at the top; existing
+  notes stay where you put them (see Reorder below).
 - Rename a note by editing the title field above the editor. If you leave the title
   blank, it's derived automatically from the note's first line.
 - Hover a note in the list and click **×** to delete it.

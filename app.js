@@ -42,6 +42,7 @@ const els = {
   newNoteBtn: document.getElementById("newNoteBtn"),
   noteTitle: document.getElementById("noteTitle"),
   searchInput: document.getElementById("searchInput"),
+  liveToggle: document.getElementById("liveToggle"),
 };
 
 // ---- App state ----
@@ -53,6 +54,17 @@ let mediaRecorder = null;
 let audioChunks = [];
 let recording = false;
 let saveTimer = null;
+
+// Live (chunked near-real-time) transcription config/state.
+const LIVE_KEY = "voice-notes:live";
+const LIVE_INTERVAL_MS = 3000;        // how often to re-transcribe the session
+const LIVE_MAX_SESSION_SEC = 90;      // cap a single live session's audio length
+let liveMode = localStorage.getItem(LIVE_KEY) === "1";
+let liveTimer = null;                 // interval that triggers re-transcription
+let liveInFlight = false;             // single-flight guard: one inference at a time
+let liveStream = null;                // active mic stream in live mode
+let committedText = "";               // editor text that existed before this session
+let interimText = "";                 // latest transcription of the current session
 
 // Notes state
 let notesIndex = [];   // [{ id, title, updatedAt }]
@@ -455,21 +467,111 @@ async function startRecording() {
 
   audioChunks = [];
   mediaRecorder = new MediaRecorder(stream);
+  liveStream = stream;
 
   mediaRecorder.ondataavailable = (e) => {
     if (e.data.size > 0) audioChunks.push(e.data);
   };
 
+  if (liveMode) {
+    startLiveRecording(stream);
+  } else {
+    startStopRecording(stream);
+  }
+
+  recording = true;
+  setRecordingUI(true);
+}
+
+// --- Mode 1: record then transcribe once on Stop (original behavior) ---
+function startStopRecording(stream) {
   mediaRecorder.onstop = async () => {
     stream.getTracks().forEach((t) => t.stop());
     const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
     await transcribeBlob(blob);
   };
-
   mediaRecorder.start();
-  recording = true;
-  setRecordingUI(true);
   setStatus("Recording… click Stop when you're done.", "active");
+}
+
+// --- Mode 2: live chunked near-real-time transcription ---
+function startLiveRecording(stream) {
+  // Snapshot the text already in the editor; the session's interim text is
+  // appended after it and refreshed on each pass.
+  committedText = els.editor.innerText.replace(/\s+$/, "");
+  interimText = "";
+
+  mediaRecorder.onstop = async () => {
+    stream.getTracks().forEach((t) => t.stop());
+    clearInterval(liveTimer);
+    liveTimer = null;
+    // One final pass to catch the tail, then commit the result permanently.
+    await runLivePass(true);
+    setDot("ready");
+  };
+
+  // Emit data periodically so audioChunks fills during the session.
+  mediaRecorder.start(1000);
+  setStatus("Live… transcribing as you speak. Click Stop to finish.", "active");
+
+  liveTimer = setInterval(() => {
+    runLivePass(false);
+  }, LIVE_INTERVAL_MS);
+}
+
+// Transcribe the whole current session's audio and update the editor's interim
+// portion. Transcribing the full session (not just the newest slice) keeps
+// Whisper seeing complete audio so words aren't clipped at chunk boundaries.
+async function runLivePass(isFinal) {
+  // Single-flight: if a pass is still running, skip this tick (graceful on slow HW).
+  if (liveInFlight) return;
+  if (audioChunks.length === 0) return;
+
+  liveInFlight = true;
+  if (!isFinal) setDot("loading");
+
+  try {
+    const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
+    const model = await ensureModel();
+    const audio = await blobToWhisperAudio(blob);
+
+    // Cap how much audio we feed in so very long sessions stay responsive.
+    const maxSamples = WHISPER_SAMPLE_RATE * LIVE_MAX_SESSION_SEC;
+    const clip = audio.length > maxSamples ? audio.slice(-maxSamples) : audio;
+
+    if (clip.length >= WHISPER_SAMPLE_RATE * 0.3) {
+      const result = await model(clip);
+      interimText = (result.text || "").trim();
+      renderLiveText();
+    }
+  } catch (err) {
+    setStatus(`Live transcription error: ${err.message}`, "error");
+  } finally {
+    liveInFlight = false;
+  }
+
+  if (isFinal) {
+    commitLiveText();
+  }
+}
+
+// Show committed + interim text together while a live session is active.
+function renderLiveText() {
+  const sep = committedText && interimText ? " " : "";
+  els.editor.innerText = committedText + sep + interimText;
+  updateWordCount();
+  els.editor.scrollTop = els.editor.scrollHeight;
+}
+
+// Fold the interim text into the committed text and persist.
+function commitLiveText() {
+  const sep = committedText && interimText ? " " : "";
+  committedText = (committedText + sep + interimText).replace(/\s+$/, "");
+  interimText = "";
+  els.editor.innerText = committedText;
+  updateWordCount();
+  scheduleSave();
+  setStatus("Live transcription saved.");
 }
 
 function stopRecording() {
@@ -477,7 +579,7 @@ function stopRecording() {
     mediaRecorder.stop();
     recording = false;
     setRecordingUI(false);
-    setStatus("Transcribing…", "active");
+    setStatus(liveMode ? "Finishing up…" : "Transcribing…", "active");
   }
 }
 
@@ -606,6 +708,17 @@ els.searchInput.addEventListener("input", () => {
   renderNotesList();
 });
 
+// Live transcription toggle.
+els.liveToggle.addEventListener("change", () => {
+  liveMode = els.liveToggle.checked;
+  localStorage.setItem(LIVE_KEY, liveMode ? "1" : "0");
+  setStatus(
+    liveMode
+      ? "Live mode on. Text appears as you speak (tiny.en recommended for speed)."
+      : "Live mode off. Transcribes once when you click Stop."
+  );
+});
+
 // Sidebar toggles.
 els.sidebarToggle.addEventListener("click", toggleSidebar);
 els.sidebarBackdrop.addEventListener("click", closeSidebar);
@@ -620,6 +733,9 @@ els.modelSelect.addEventListener("change", () => {
 if ([...els.modelSelect.options].some((o) => o.value === currentModel)) {
   els.modelSelect.value = currentModel;
 }
+
+// Restore live-mode toggle state.
+els.liveToggle.checked = liveMode;
 
 // --- Startup: load notes, migrate legacy, open an active note ---
 loadIndex();
