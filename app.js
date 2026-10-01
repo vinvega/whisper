@@ -41,6 +41,7 @@ const els = {
   notesList: document.getElementById("notesList"),
   newNoteBtn: document.getElementById("newNoteBtn"),
   noteTitle: document.getElementById("noteTitle"),
+  searchInput: document.getElementById("searchInput"),
 };
 
 // ---- App state ----
@@ -56,6 +57,8 @@ let saveTimer = null;
 // Notes state
 let notesIndex = [];   // [{ id, title, updatedAt }]
 let activeId = null;   // id of the open note
+let searchQuery = "";  // current filter text (lowercased)
+let dragId = null;     // id of the note being dragged
 
 // ---------------------------------------------------------------------------
 // UI helpers
@@ -181,8 +184,7 @@ function scheduleSave() {
       const custom = els.noteTitle.value.trim();
       entry.title = custom || deriveTitle(body);
       entry.updatedAt = Date.now();
-      // Move most-recently-edited note to the top.
-      notesIndex = [entry, ...notesIndex.filter((n) => n.id !== activeId)];
+      // Keep the user's manual order; editing no longer reorders the list.
       saveIndex();
     }
     els.saveState.textContent = "Saved";
@@ -203,21 +205,52 @@ function formatTime(ts) {
     : d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+// Does a note match the current search query (title or body)?
+function noteMatches(note) {
+  if (!searchQuery) return true;
+  const hay = (note.title + " " + getNoteBody(note.id)).toLowerCase();
+  return hay.includes(searchQuery);
+}
+
 function renderNotesList() {
   els.notesList.innerHTML = "";
+
   if (notesIndex.length === 0) {
     const empty = document.createElement("li");
-    empty.className = "note-item-preview";
-    empty.style.padding = "10px";
+    empty.className = "notes-empty";
     empty.textContent = "No notes yet.";
     els.notesList.appendChild(empty);
     return;
   }
 
-  for (const note of notesIndex) {
+  const visible = notesIndex.filter(noteMatches);
+  if (visible.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "notes-empty";
+    empty.textContent = "No notes match your search.";
+    els.notesList.appendChild(empty);
+    return;
+  }
+
+  // Dragging is only enabled with no active search, so the reorder maps
+  // directly onto the full list without ambiguity.
+  const dragEnabled = !searchQuery;
+
+  for (const note of visible) {
     const li = document.createElement("li");
     li.className = "note-item" + (note.id === activeId ? " active" : "");
     li.dataset.id = note.id;
+
+    if (dragEnabled) {
+      const handle = document.createElement("div");
+      handle.className = "drag-handle";
+      handle.title = "Drag to reorder";
+      handle.textContent = "⠿";
+      // Only start a drag when the handle is the grab point.
+      handle.draggable = true;
+      attachDragHandlers(handle, li, note.id);
+      li.appendChild(handle);
+    }
 
     const main = document.createElement("div");
     main.className = "note-item-main";
@@ -253,8 +286,64 @@ function renderNotesList() {
       if (isOverlayMode()) closeSidebar();
     });
 
+    // Make the row a drop target even though only the handle initiates dragging.
+    if (dragEnabled) attachDropHandlers(li, note.id);
+
     els.notesList.appendChild(li);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Drag-to-reorder
+// ---------------------------------------------------------------------------
+function attachDragHandlers(handle, li, id) {
+  handle.addEventListener("dragstart", (e) => {
+    dragId = id;
+    li.classList.add("dragging");
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = "move";
+      // Firefox requires data to be set for the drag to start.
+      e.dataTransfer.setData("text/plain", id);
+    }
+  });
+  handle.addEventListener("dragend", () => {
+    li.classList.remove("dragging");
+    dragId = null;
+    [...els.notesList.children].forEach((c) =>
+      c.classList && c.classList.remove("drag-over")
+    );
+  });
+}
+
+function attachDropHandlers(li, targetId) {
+  li.addEventListener("dragover", (e) => {
+    if (dragId === null || dragId === targetId) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+    li.classList.add("drag-over");
+  });
+  li.addEventListener("dragleave", () => li.classList.remove("drag-over"));
+  li.addEventListener("drop", (e) => {
+    e.preventDefault();
+    li.classList.remove("drag-over");
+    if (dragId !== null && dragId !== targetId) {
+      reorderNotes(dragId, targetId);
+    }
+  });
+}
+
+// Move the dragged note so it sits immediately before the target note.
+function reorderNotes(fromId, toId) {
+  const fromIdx = notesIndex.findIndex((n) => n.id === fromId);
+  const toIdx = notesIndex.findIndex((n) => n.id === toId);
+  if (fromIdx === -1 || toIdx === -1) return;
+
+  const [moved] = notesIndex.splice(fromIdx, 1);
+  // Recompute target index after removal.
+  const insertAt = notesIndex.findIndex((n) => n.id === toId);
+  notesIndex.splice(insertAt, 0, moved);
+  saveIndex();
+  renderNotesList();
 }
 
 function onDeleteNote(id) {
@@ -509,6 +598,12 @@ els.noteTitle.addEventListener("keydown", (e) => {
     e.preventDefault();
     els.editor.focus();
   }
+});
+
+// Search filter.
+els.searchInput.addEventListener("input", () => {
+  searchQuery = els.searchInput.value.trim().toLowerCase();
+  renderNotesList();
 });
 
 // Sidebar toggles.

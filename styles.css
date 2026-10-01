@@ -157,12 +157,36 @@ select, .btn {
   color: var(--muted);
 }
 
+.sidebar-search {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.search-input {
+  width: 100%;
+  font-size: 14px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  outline: none;
+}
+.search-input:focus { border-color: var(--accent); }
+.search-input::placeholder { color: var(--muted); }
+
 .notes-list {
   list-style: none;
   margin: 0;
   padding: 6px;
   overflow-y: auto;
   flex: 1;
+}
+
+.notes-empty {
+  padding: 12px 10px;
+  font-size: 13px;
+  color: var(--muted);
+  text-align: center;
 }
 
 .note-item {
@@ -179,6 +203,26 @@ select, .btn {
   background: var(--bg);
   border-color: var(--accent);
 }
+
+/* Drag-to-reorder states */
+.note-item.dragging {
+  opacity: 0.45;
+}
+.note-item.drag-over {
+  border-top: 2px solid var(--accent);
+}
+.drag-handle {
+  flex-shrink: 0;
+  width: 16px;
+  align-self: center;
+  color: var(--muted);
+  cursor: grab;
+  text-align: center;
+  font-size: 14px;
+  line-height: 1;
+  user-select: none;
+}
+.drag-handle:active { cursor: grabbing; }
 
 .note-item-main { flex: 1; min-width: 0; }
 .note-item-title {

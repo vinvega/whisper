@@ -7,6 +7,7 @@ so after the first load there is no internet, no server, and no cost.
 - Record your voice, get text appended to an editable document
 - Edit and type by hand too
 - Keep multiple notes, selectable from a sidebar (create, rename, delete)
+- Search/filter notes and drag to reorder them
 - Auto-saves to the browser; export the current note any time as `.txt`
 - Installs to the Chromebook shelf and runs offline
 
@@ -80,3 +81,7 @@ If transcription feels slow on your Chromebook, switch to `tiny.en`.
   blank, it's derived automatically from the note's first line.
 - Hover a note in the list and click **×** to delete it.
 - The active note is remembered, so reopening the app returns you to it.
+- **Search:** type in the search box to filter notes by title or content.
+- **Reorder:** grab the handle (⠿) on the left of a note and drag it up or down.
+  The order you set is saved. Editing a note no longer changes its position, so
+  your manual order sticks. (Reordering is disabled while a search is active.)
