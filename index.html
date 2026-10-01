@@ -111,6 +111,18 @@
     </main>
   </div>
 
+  <div id="busyOverlay" class="busy-overlay" hidden role="status" aria-live="assertive">
+    <div class="busy-card">
+      <div class="busy-spinner" aria-hidden="true"></div>
+      <h2 class="busy-title" id="busyTitle">Preparing the speech model…</h2>
+      <p class="busy-sub" id="busySub">Downloading once. This can take a minute on the first run.</p>
+      <div class="busy-progress">
+        <div class="busy-progress-fill" id="busyProgressFill"></div>
+      </div>
+      <p class="busy-note">Please wait — recording won't start until this finishes.</p>
+    </div>
+  </div>
+
   <script type="module" src="app.js"></script>
 </body>
 </html>

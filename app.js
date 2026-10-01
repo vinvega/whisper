@@ -51,6 +51,10 @@ const els = {
   disconnectFolderBtn: document.getElementById("disconnectFolderBtn"),
   readToggleRow: document.getElementById("readToggleRow"),
   readToggle: document.getElementById("readToggle"),
+  busyOverlay: document.getElementById("busyOverlay"),
+  busyTitle: document.getElementById("busyTitle"),
+  busySub: document.getElementById("busySub"),
+  busyProgressFill: document.getElementById("busyProgressFill"),
 };
 
 // ---- App state ----
@@ -102,6 +106,39 @@ function setStatus(msg, kind = "") {
 
 function setDot(kind) {
   els.statusDot.className = "dot" + (kind ? " " + kind : "");
+}
+
+// --- Busy overlay (shown while the speech model is loading/downloading) ---
+// Per-file download progress is aggregated into one overall bar.
+let busyProgress = {}; // file -> percent (0..100)
+
+function showBusy(title, sub) {
+  busyProgress = {};
+  if (title) els.busyTitle.textContent = title;
+  if (sub) els.busySub.textContent = sub;
+  // Start indeterminate until the first numeric progress arrives.
+  els.busyProgressFill.parentElement.classList.add("indeterminate");
+  els.busyProgressFill.style.width = "0%";
+  els.busyOverlay.hidden = false;
+  els.recordBtn.disabled = true; // can't record until the model is ready
+}
+
+function updateBusyProgress(file, percent) {
+  busyProgress[file] = percent;
+  const vals = Object.values(busyProgress);
+  if (vals.length === 0) return;
+  const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+  // Leave indeterminate mode once we have a real number.
+  els.busyProgressFill.parentElement.classList.remove("indeterminate");
+  els.busyProgressFill.style.width = `${Math.round(avg)}%`;
+  els.busySub.textContent = `Downloading model… ${Math.round(avg)}%`;
+}
+
+function hideBusy() {
+  els.busyOverlay.hidden = true;
+  els.busyProgressFill.parentElement.classList.remove("indeterminate");
+  // Only re-enable the record button if we're not mid-stop-teardown.
+  if (!stopping) els.recordBtn.disabled = false;
 }
 
 function setRecordingUI(isRecording) {
@@ -491,21 +528,26 @@ async function ensureModel() {
 
   loadingModel = true;
   setDot("loading");
-  setStatus(`Loading ${currentModel.split("/")[1]} model (first time downloads once)…`);
+  const modelName = currentModel.split("/")[1];
+  setStatus(`Loading ${modelName} model (first time downloads once)…`);
+  showBusy("Preparing the speech model…", `Loading ${modelName}. Downloaded once, then cached.`);
 
   try {
     transcriber = await pipeline("automatic-speech-recognition", currentModel, {
       progress_callback: (p) => {
         if (p.status === "progress" && p.file && typeof p.progress === "number") {
           setStatus(`Downloading ${p.file}: ${Math.round(p.progress)}%`);
+          updateBusyProgress(p.file, p.progress);
         }
       },
     });
     setDot("ready");
     setStatus("Model ready. Click Record to capture an idea.");
+    hideBusy();
   } catch (err) {
     setDot("error");
     setStatus(`Failed to load model: ${err.message}`, "error");
+    hideBusy();
     throw err;
   } finally {
     loadingModel = false;
@@ -585,6 +627,18 @@ async function startRecording() {
   if (startingRecording || recording || stopping) return;
   startingRecording = true;
 
+  // Ensure the model is loaded BEFORE we start capturing. On first run this
+  // triggers the download; the busy overlay makes it clear the app isn't ready
+  // and the record button is disabled, so speaking now won't be lost silently.
+  if (!transcriber || currentModel !== els.modelSelect.value) {
+    try {
+      await ensureModel();
+    } catch {
+      startingRecording = false;
+      return; // ensureModel already surfaced the error and hid the overlay
+    }
+  }
+
   let stream;
   try {
     stream = await getMicStream();
@@ -596,9 +650,6 @@ async function startRecording() {
 
   // First successful grant reveals device labels — refresh the picker.
   populateMicList();
-
-  // Warm up the model while the user starts talking.
-  ensureModel().catch(() => {});
 
   audioChunks = [];
   mediaRecorder = new MediaRecorder(stream);
