@@ -904,6 +904,13 @@ async function transcribeBlob(blob) {
 
 // Append transcribed text to the editor at the end, with sensible spacing.
 function appendText(text) {
+  // Non-invasive hook: when collaboration mode is driving a recording, it sets a
+  // transcript sink so dictated text goes to the collab post editor instead of the
+  // private-notes editor. Private notes behave exactly as before when unset.
+  if (typeof window !== "undefined" && typeof window.__transcriptSink === "function") {
+    window.__transcriptSink(text);
+    return;
+  }
   const existing = els.editor.innerText.replace(/\s+$/, "");
   const needsSpace = existing.length > 0;
   const sep = needsSpace ? (/[.!?]$/.test(existing) ? " " : " ") : "";
@@ -1458,6 +1465,22 @@ document.addEventListener("keydown", (e) => {
     else if (!startingRecording && !stopping) startRecording();
   }
 });
+
+// Minimal voice-capture bridge for the collaboration module. It reuses the exact
+// same recorder/transcription pipeline; the only difference is where text lands,
+// controlled via window.__transcriptSink (see appendText). Collab uses stop-mode
+// capture (sink receives the final transcript) to keep things simple.
+window.__voiceCapture = {
+  start() {
+    if (!recording && !startingRecording && !stopping) startRecording();
+  },
+  stop() {
+    if (recording) stopRecording();
+  },
+  isRecording() {
+    return recording;
+  },
+};
 
 // Register the service worker for offline support.
 if ("serviceWorker" in navigator) {

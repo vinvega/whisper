@@ -20,7 +20,10 @@ import {
   postFileName,
   isOwnedBy,
   mediaFileName,
+  assemble,
 } from "./collab-core.js";
+
+const STORY_FILE = "story.md";
 
 const POSTS_DIR = "posts";
 const MEDIA_DIR = "media";
@@ -278,6 +281,32 @@ export function createCollabStore(dirHandle, penName) {
     }
   }
 
+  // --- Build combined story (Req 7) -----------------------------------------
+  // Assemble the currently-loaded posts into story.md. This is pure OUTPUT: it is
+  // written directly (NOT via writeOwnPost) and is EXEMPT from single-writer /
+  // conflict / .bak handling — any user may regenerate it, last-writer-wins is
+  // acceptable because posts remain the source of truth and assembly is
+  // deterministic. Returns { built, skipped } ; skips an identical rebuild.
+  let lastBuiltContent = null;
+
+  async function buildCombinedStory() {
+    const md = assemble([...store.posts.values()]);
+    if (md === lastBuiltContent) {
+      return { built: false, skipped: true, content: md };
+    }
+    const fh = await dirHandle.getFileHandle(STORY_FILE, { create: true });
+    const w = await fh.createWritable();
+    await w.write(md);
+    await w.close();
+    lastBuiltContent = md;
+    return { built: true, skipped: false, content: md };
+  }
+
+  // The assembled text without writing anywhere (for local download / preview).
+  function assembledText() {
+    return assemble([...store.posts.values()]);
+  }
+
   // --- helpers ----------------------------------------------------------------
   function assertOwned(author) {
     if (penSlug(author) !== slug) {
@@ -311,6 +340,8 @@ export function createCollabStore(dirHandle, penName) {
     writeOwnMedia,
     listMedia,
     deleteOwnMedia,
+    buildCombinedStory,
+    assembledText,
     setEditing,
     get posts() {
       return store.posts;

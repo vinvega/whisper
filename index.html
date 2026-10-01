@@ -35,6 +35,7 @@
       </label>
       <button id="exportBtn" class="btn ghost" title="Download current note as .txt">Export</button>
       <button id="newBtn" class="btn ghost" title="Create a new note">New</button>
+      <button id="modeToggle" class="btn ghost" type="button" title="Switch between private notes and collaboration" aria-pressed="false">Collaboration</button>
     </div>
   </header>
 
@@ -109,6 +110,100 @@
         </button>
       </footer>
     </main>
+
+    <!-- Collaboration sidebar (parallel to the private-notes sidebar) -->
+    <aside id="collabSidebar" class="sidebar collab-sidebar" hidden>
+      <div class="sidebar-head">
+        <span class="sidebar-title">Story posts</span>
+        <button id="newPostBtn" class="btn ghost small" title="Start a new post">+ New post</button>
+      </div>
+
+      <div class="collab-connect">
+        <label class="collab-field">
+          <span class="collab-field-label">Pen name</span>
+          <input
+            id="penNameInput"
+            class="search-input"
+            type="text"
+            placeholder="Your pen name…"
+            aria-label="Pen name"
+            autocomplete="off"
+          />
+        </label>
+        <div class="collab-connect-actions">
+          <button id="connectStoryBtn" class="btn ghost small" title="Pick a shared story folder">Connect story folder</button>
+          <button id="disconnectStoryBtn" class="btn ghost small" title="Stop using the story folder" hidden>Disconnect</button>
+          <button id="refreshStoryBtn" class="btn ghost small" title="Reload posts from the folder">Refresh</button>
+        </div>
+        <button id="updatesIndicator" class="updates-indicator" type="button" hidden></button>
+        <div id="collabStatus" class="collab-status" aria-live="polite">Not connected.</div>
+      </div>
+
+      <ul id="postList" class="notes-list collab-post-list" aria-label="Story posts"></ul>
+    </aside>
+
+    <!-- Collaboration main view -->
+    <main id="collabMain" class="collab-main" hidden>
+      <section class="collab-editor-pane">
+        <div class="collab-editor-head">
+          <span class="collab-editor-title">Post editor</span>
+          <div class="collab-editor-actions">
+            <button id="postRecordBtn" class="btn ghost small" type="button" title="Dictate into this post">Record</button>
+            <button id="insertPictureBtn" class="btn ghost small" type="button" title="Insert a picture">Insert picture</button>
+            <button id="savePostBtn" class="btn ghost small" type="button" title="Save this post">Save</button>
+            <button id="deletePostBtn" class="btn ghost small" type="button" title="Delete this post" hidden>Delete</button>
+          </div>
+        </div>
+        <div class="editor-wrap">
+          <div
+            id="postEditor"
+            class="editor"
+            contenteditable="true"
+            spellcheck="true"
+            data-placeholder="Write or dictate your part of the story…"
+            aria-label="Post editor"
+          ></div>
+        </div>
+      </section>
+
+      <section class="collab-assembled-pane">
+        <div class="collab-assembled-head">
+          <span class="collab-assembled-title">Assembled story</span>
+          <div class="collab-assembled-actions">
+            <button id="buildStoryBtn" class="btn ghost small" type="button" title="Write the combined story.md">Build combined story</button>
+            <button id="downloadStoryBtn" class="btn ghost small" type="button" title="Download the assembled story as .md">Download .md</button>
+          </div>
+        </div>
+        <div id="assembledView" class="assembled-view" aria-label="Assembled story preview" aria-readonly="true"></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Media picker modal -->
+  <div id="mediaPickerModal" class="media-modal" hidden role="dialog" aria-modal="true" aria-label="Insert picture">
+    <div class="media-card">
+      <div class="media-card-head">
+        <h2 class="media-card-title">Insert picture</h2>
+        <button id="mediaCancelBtn" class="icon-btn media-close" type="button" title="Cancel" aria-label="Cancel">×</button>
+      </div>
+
+      <label class="media-upload">
+        <span class="collab-field-label">Upload new</span>
+        <input id="mediaUploadInput" type="file" accept="image/*" aria-label="Upload a new picture" />
+      </label>
+
+      <div class="media-grid-label collab-field-label">Or choose existing</div>
+      <div id="mediaGrid" class="media-grid" aria-label="Existing media"></div>
+
+      <label class="media-alt">
+        <span class="collab-field-label">Alt text</span>
+        <input id="mediaAltInput" class="search-input" type="text" placeholder="Describe the picture…" aria-label="Alt text" autocomplete="off" />
+      </label>
+
+      <div class="media-actions">
+        <button id="mediaInsertBtn" class="btn ghost small" type="button">Insert</button>
+      </div>
+    </div>
   </div>
 
   <div id="busyOverlay" class="busy-overlay" hidden role="status" aria-live="assertive">
@@ -124,5 +219,6 @@
   </div>
 
   <script type="module" src="app.js"></script>
+  <script type="module" src="collab.js"></script>
 </body>
 </html>

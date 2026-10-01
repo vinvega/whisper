@@ -12,6 +12,8 @@ so after the first load there is no internet, no server, and no cost.
 - Search/filter notes and drag to reorder them
 - Optional folder sync: mirror notes to `.txt` files (e.g. in Google Drive), with
   protection against overwriting edits made outside the app
+- Optional Collaboration mode: co-write a shared story as markdown posts in a shared
+  folder, assembled into one document (single-writer-per-post, no merge conflicts)
 - Auto-saves to the browser; export the current note any time as `.txt`
 - Keyboard shortcuts for new note, search, export, sidebar, and recording
 - Installs to the Chromebook shelf and runs offline
@@ -219,6 +221,58 @@ conflicts always leave a recoverable `.bak` copy.
   — the other side is preserved as a `.bak`).
 - One note maps to one file. Renaming a note writes the file under the new name and
   removes the old one automatically (the stable id in the filename makes this safe).
+
+## Collaboration mode (shared story writing)
+
+Beyond private notes, the app has an opt-in **Collaboration** mode for writing a
+shared document (e.g. a story) with someone else via a shared folder — point it at
+a folder inside a shared Google Drive and Drive syncs the files between you.
+
+Switch modes with the **Collaboration / Notes** button in the header. Private notes
+are untouched and remain the default.
+
+### How it works
+
+- **One post per file, single writer.** Each contribution is its own markdown file
+  (with front-matter) in the folder's `posts/` directory. You only ever edit *your
+  own* posts; co-authors' posts are read-only in your view. Because no two people
+  ever write the same file, concurrent writing never collides — there's no text
+  merge and no lock-step editing.
+- **Pen name.** Set a persistent pen name; it identifies your posts and determines
+  which ones you can edit.
+- **Assembled document.** The combined story is derived by sorting all posts by an
+  `order` field and concatenating them — deterministic, so every collaborator sees
+  the same result.
+
+### Working together
+
+- **Refresh model:** a manual **Refresh** button pulls in co-authors' latest posts.
+  A quiet background check shows an **"N updates — Refresh"** indicator when the
+  folder changes, but never reshuffles your view or touches the post you're editing
+  until you click it.
+- **Conflicts on your own posts:** if one of your posts changed in the folder since
+  you last wrote it, you get **Keep mine** (backs up the other version as `.bak`) or
+  **Load from folder** — same safety net as private folder sync.
+- **Voice + pictures:** dictate posts with the same local Whisper transcription.
+  **Insert picture** adds a new image (stored in `media/`) or reuses an existing one
+  from the story, dropping the markdown at your cursor.
+- **Build combined story:** the **Build combined story** button writes `story.md`
+  into the folder from what you currently have synced, so anyone can read the whole
+  assembled document (even outside the app, straight from Drive). It also rebuilds
+  automatically after ~30s of inactivity, and you can download the assembled `.md`
+  locally.
+
+### Trust model & limitations
+
+- This is designed for **trusted collaborators sharing a folder**. Ownership
+  (who-can-edit-what) is enforced by the app, not by the filesystem — anyone with
+  folder access could edit any file outside the app. There is no authentication.
+- `story.md` is regenerated output; editing it by hand will be overwritten. The
+  posts are the source of truth.
+- Like folder sync, Collaboration needs the File System Access API (Chrome/Edge/
+  ChromeOS). In other browsers the mode is unavailable but private notes still work.
+- It does not do live, in-place co-editing of the *same* post (that's the CRDT
+  problem the one-file-per-post design intentionally avoids).
 
 ## Ideas for future improvement
 

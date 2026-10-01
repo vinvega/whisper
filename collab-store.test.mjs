@@ -238,6 +238,80 @@ async function run() {
     assert((await store.listMedia()).length === 0, "deleteOwnMedia removes own media");
   }
 
+  // --- buildCombinedStory: writes story.md, skips identical, no conflict path ---
+  {
+    const root = makeDir();
+    await seedPost(root, P({ id: "s1", author: "Vin Vega", order: 1, body: "Chapter one." }));
+    await seedPost(root, P({ id: "s2", author: "Co Author", order: 2, body: "Chapter two." }));
+    const store = createCollabStore(root, "Vin Vega");
+    await store.applyRefresh();
+
+    const r1 = await store.buildCombinedStory();
+    assert(r1.built === true, "buildCombinedStory writes on first build");
+    const storyText = await (await root.getFileHandle("story.md")).getFile().then((f) => f.text());
+    assert(storyText === "Chapter one.\n\nChapter two.", "story.md assembled in order across authors");
+
+    const r2 = await store.buildCombinedStory();
+    assert(r2.skipped === true && r2.built === false, "identical rebuild is skipped");
+  }
+
+  // --- buildCombinedStory overwrites a co-author's story.md with no conflict ---
+  {
+    const root = makeDir();
+    // Pre-seed an existing story.md (as if a co-author built it).
+    const fh = await root.getFileHandle("story.md", { create: true });
+    const w = await fh.createWritable();
+    await w.write("stale content from someone else");
+    await w.close();
+
+    await seedPost(root, P({ id: "o1", author: "Vin Vega", order: 1, body: "fresh" }));
+    const store = createCollabStore(root, "Vin Vega");
+    await store.applyRefresh();
+    const r = await store.buildCombinedStory();
+    assert(r.built === true, "overwrites existing story.md without a conflict prompt");
+    const t = await (await root.getFileHandle("story.md")).getFile().then((f) => f.text());
+    assert(t === "fresh", "story.md replaced with current assembly (last-writer-wins)");
+  }
+
+  // --- INTEGRATION: two authors, same folder, identical deterministic assembly ---
+  {
+    const root = makeDir(); // one shared folder (simulating Drive-synced files)
+
+    // Author A writes a post.
+    const a = createCollabStore(root, "Author A");
+    await a.applyRefresh();
+    await a.writeOwnPost(P({ id: "pA", author: "Author A", order: 100, body: "Alpha paragraph." }));
+
+    // Author B writes a post into the SAME folder.
+    const b = createCollabStore(root, "Author B");
+    await b.applyRefresh();
+    await b.writeOwnPost(P({ id: "pB", author: "Author B", order: 50, body: "Beta paragraph (earlier)." }));
+
+    // Both refresh to see each other's files.
+    await a.applyRefresh();
+    await b.applyRefresh();
+
+    assert(a.posts.size === 2 && b.posts.size === 2, "both authors see both posts");
+    // Neither clobbered the other: both files exist.
+    const posts = await root.getDirectoryHandle("posts");
+    const names = [];
+    for await (const [n] of posts.entries()) names.push(n);
+    assert(names.some((n) => n.includes("__author-a__pA.md")), "author A's file intact");
+    assert(names.some((n) => n.includes("__author-b__pB.md")), "author B's file intact");
+
+    // Assembly is identical for both and respects order (B's 50 before A's 100).
+    const asmA = a.assembledText();
+    const asmB = b.assembledText();
+    assert(asmA === asmB, "both authors compute an identical assembled document");
+    assert(asmA === "Beta paragraph (earlier).\n\nAlpha paragraph.",
+      "assembly ordered by `order` across authors: " + JSON.stringify(asmA));
+
+    // Ownership: A cannot write B's post.
+    let refused = false;
+    try { await a.writeOwnPost(P({ id: "pB", author: "Author B", body: "hijack" })); } catch { refused = true; }
+    assert(refused, "author A refused to write author B's post (single-writer)");
+  }
+
   console.log(`\nALL ${passed} COLLAB-STORE TESTS PASSED`);
 }
 
