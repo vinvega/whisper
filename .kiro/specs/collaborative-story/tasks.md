@@ -32,10 +32,17 @@ System Access API already used in prior smoke tests.
     reusing the existing directory-picker + IndexedDB handle persistence. Keep it
     separate from private-notes sync.
     _Reqs: 3.1, 8.2, 8.3_
-  - [ ] 2.2 Implement `scanStory()`: read `posts/*.md`, parse, mark `mine` via pen
-    slug, upsert map, drop vanished files, trigger re-render. Mock-FS test for
-    multi-author scan and for a disappearing file.
+  - [ ] 2.2 Implement `applyRefresh()`: read `posts/*.md`, parse, mark `mine` via
+    pen slug, upsert map, drop vanished files (but never discard the post being
+    edited), recompute snapshot, re-render. Mock-FS test for multi-author load and
+    for a disappearing file.
     _Reqs: 3.4, 3.5, 2.6_
+  - [ ] 2.2a Implement `detectChanges()` (read-only diff vs. last-applied snapshot)
+    and the notify-only background loop that shows an "N updates" indicator without
+    applying. Manual Refresh and the indicator both call `applyRefresh()`. Test that
+    background detection never mutates the posts map or the in-edit post, and that
+    manual refresh applies. 
+    _Reqs: 3a.1-3a.7_
   - [ ] 2.3 Implement `writeOwnPost(post)` reusing external-change detection,
     `.bak` on conflict, and rename-cleanup. Mock-FS tests: normal write, external
     change → conflict (no clobber), reorder → old file removed.
@@ -70,10 +77,12 @@ System Access API already used in prior smoke tests.
   - [ ] 4.1 Add an explicit Private ↔ Collaboration mode switch; private notes
     remain the default and are untouched. Pen-name prompt/settings field.
     _Reqs: 1.1, 1.3, 8.1, 8.2, 8.4_
-  - [ ] 4.2 Post list view: all posts with author attribution; own posts
-    editable/deletable/reorderable, others read-only. Reuse conflict badges for own
-    posts.
-    _Reqs: 2.5, 2.6, 4.4, 6.2_
+  - [ ] 4.2 Post list view: ALL posts (own + co-authors') with author attribution,
+    always visible alongside the editor; own posts editable/deletable/reorderable,
+    others read-only. Reuse conflict badges for own posts. Add the manual **Refresh**
+    button and the "N updates — Refresh" indicator (wires to task 2.2a); clicking
+    either applies the refresh.
+    _Reqs: 2.5, 2.6, 2.7, 4.4, 6.2, 3a.1, 3a.3, 3a.6_
   - [ ] 4.3 Post editor: create/edit a post via typing and via existing voice
     transcription (Live + stop, with non-speech filtering). Include the **Insert
     picture** button (wires to tasks 3.3-3.5) and render inserted images in the

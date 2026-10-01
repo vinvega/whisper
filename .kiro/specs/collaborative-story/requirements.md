@@ -70,6 +70,10 @@ co-author.
    `author` matches the user's pen name).
 6. The system SHALL NOT allow editing or deleting posts authored by someone else
    from within the app (read-only for others' posts).
+7. The system SHALL keep ALL posts (the user's own and co-authors') visible in the
+   post list while the user is editing a post, so the user retains the context of
+   the whole story. Only one of the user's own posts is edited at a time; the list
+   remains alongside the editor.
 
 ---
 
@@ -87,10 +91,42 @@ between collaborators, so that we each see one another's contributions.
    rely on Drive to sync post files between collaborators (no Drive API / OAuth).
 3. The system SHALL only write files it owns: the user's own posts and media. It
    SHALL NOT modify files authored by others.
-4. The system SHALL periodically (and on demand) re-scan the folder to pick up new
-   or changed posts from collaborators.
+4. The system SHALL re-scan the folder to pick up new or changed posts from
+   collaborators (see Requirement 3a for exactly how/when).
 5. WHEN a collaborator adds a new post file THEN the system SHALL include it in the
-   assembled document on the next scan.
+   view the next time changes are applied (manual refresh, or an automatic apply
+   when safe — see Requirement 3a).
+
+---
+
+## Requirement 3a: Refresh model (manual + notify-only background check)
+
+**User story:** As a contributor, I want control over when co-authors' changes
+appear in my view, so that new content never reshuffles the list while I'm in the
+middle of writing, but I'm still told when there's something new.
+
+### Acceptance criteria
+
+1. The system SHALL provide a **manual Refresh** control that, when invoked, scans
+   the shared folder and applies all detected changes (new/edited/removed posts and
+   media) to the view.
+2. The system SHALL run a **quiet background check** on an interval that detects
+   whether the folder has changed, WITHOUT automatically reshuffling or replacing
+   what the user is currently viewing/editing.
+3. WHEN the background check detects changes THEN the system SHALL show an
+   unobtrusive indicator (e.g. "N new updates — Refresh") rather than applying them
+   immediately.
+4. The system SHALL NOT alter the content of the post the user is actively editing
+   as a result of a background check. The user's in-progress text is never replaced
+   without an explicit action.
+5. WHEN the user is NOT actively editing (e.g. viewing the assembled document) THEN
+   the system MAY apply detected changes automatically, OR surface the same
+   indicator; it SHALL NOT, in any case, discard unsaved edits.
+6. Clicking the indicator SHALL perform the same operation as the manual Refresh
+   control.
+7. The background check interval SHALL be chosen to be light on the folder (polling,
+   since the File System Access API provides no change notifications) and SHALL be
+   pausable/absent without breaking manual refresh.
 
 ---
 

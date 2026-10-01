@@ -141,22 +141,58 @@ function assemble(posts):
 - Pure function of the file set → identical output for every collaborator.
 - Rendered as read-only; never edited directly.
 
-### 5.2 Scan (pick up collaborators' changes)
+### 5.2 Scan + refresh model (manual primary, notify-only background)
+
+Two distinct operations (Req 3a):
+
+**`detectChanges()` — read-only probe, used by the background check.** Cheap: list
+`posts/` and `media/`, compare the set of filenames + each file's `lastModified`/
+`size` against a lightweight snapshot taken at the last applied refresh. Returns a
+count/summary of what differs. Does NOT touch the view or the posts map.
 
 ```
-on interval / on demand:
+detectChanges():
+    current = list(posts/) with {name, lastModified, size}
+    diff = compare(current, lastAppliedSnapshot)   # added / changed / removed
+    return diff   # e.g. { added: 2, changed: 1, removed: 0 }
+```
+
+**`applyRefresh()` — the actual load, used by manual Refresh and the indicator.**
+
+```
+applyRefresh():
     for each *.md in posts/:
         parse front-matter + body
         mark mine = slug(author) === penSlug
-        upsert into posts map
-    remove posts whose files disappeared
-    re-render assembled view
+        upsert into posts map   # others' posts: read-only inputs
+    remove posts whose files disappeared (unless it is the post being edited; keep
+        the in-progress editor content, flag separately)
+    recompute lastAppliedSnapshot
+    clear the "updates available" indicator
+    re-render list + assembled view
 ```
 
-- Others' posts are read-only inputs: scanning them never raises a conflict.
-- Own posts: compare file lastModified/size to stored `sync` → if changed
-  externally, raise the existing conflict flow (Keep mine / Load from folder, with
-  `.bak`).
+**Background loop (notify-only):**
+
+```
+on interval (e.g. ~20s):
+    diff = detectChanges()
+    if diff has any changes:
+        show indicator "N updates — Refresh"   # does NOT applyRefresh()
+```
+
+Rules enforcing Req 3a:
+- The background loop only ever calls `detectChanges()` + shows an indicator; it
+  never calls `applyRefresh()` on its own while editing.
+- The post currently being edited is never overwritten by a refresh; its unsaved
+  body is preserved. (If that same file also changed on disk — the user's own post
+  edited elsewhere — it is the existing own-post conflict case: Keep mine / Load
+  from folder, surfaced on save, not silently applied.)
+- When the user is only viewing the assembled doc (not editing), `applyRefresh()`
+  MAY run automatically; it still never discards unsaved edits.
+- Own posts: compare file `lastModified`/`size` to stored `sync` → if changed
+  externally, raise the existing conflict flow (`.bak` safety) rather than clobber.
+- Manual Refresh and the indicator both call `applyRefresh()`.
 
 ### 5.3 Write own post
 
@@ -207,8 +243,13 @@ attach), markdown rendering for the assembled preview.
 - **Mode switch**: Private notes ↔ Collaboration (opt-in; private remains default).
 - **Pen name setup/field.**
 - **Connect story folder** (reuses folder picker).
-- **Post list**: shows all posts with author attribution; the user's own posts are
-  editable/reorderable/deletable; others' are read-only.
+- **Post list**: shows ALL posts (own + co-authors') with author attribution,
+  always visible alongside the editor so the whole-story context is retained while
+  writing; the user's own posts are editable/reorderable/deletable, others' are
+  read-only.
+- **Refresh control + "updates available" indicator**: a manual Refresh button; the
+  background check surfaces an unobtrusive "N updates — Refresh" badge that applies
+  changes only when clicked (§5.2, Req 3a).
 - **Assembled view**: read-only rendered document; export button.
 - **Insert picture**: button in the post editor; see §8.1.
 - **Conflict badges** on the user's own posts (reusing the existing pattern).
