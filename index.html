@@ -13,6 +13,9 @@
 <body>
   <header class="app-header">
     <div class="brand">
+      <button id="sidebarToggle" class="icon-btn" title="Show/hide notes" aria-label="Toggle notes list">
+        <span class="hamburger"></span>
+      </button>
       <span class="dot" id="statusDot" title="Model status"></span>
       <h1>Voice Notes</h1>
     </div>
@@ -22,36 +25,58 @@
         <option value="Xenova/whisper-base.en" selected>base.en (balanced)</option>
         <option value="Xenova/whisper-small.en">small.en (most accurate)</option>
       </select>
-      <button id="exportBtn" class="btn ghost" title="Download as .txt">Export</button>
-      <button id="newBtn" class="btn ghost" title="Clear and start a new note">New</button>
+      <button id="exportBtn" class="btn ghost" title="Download current note as .txt">Export</button>
+      <button id="newBtn" class="btn ghost" title="Create a new note">New</button>
     </div>
   </header>
 
-  <main class="app-main">
-    <div id="status" class="status" aria-live="polite">Ready. Click Record to start.</div>
+  <div class="app-body">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-head">
+        <span class="sidebar-title">Notes</span>
+        <button id="newNoteBtn" class="btn ghost small" title="Create a new note">+ New</button>
+      </div>
+      <ul id="notesList" class="notes-list" aria-label="Saved notes"></ul>
+    </aside>
 
-    <div class="editor-wrap">
-      <div
-        id="editor"
-        class="editor"
-        contenteditable="true"
-        spellcheck="true"
-        data-placeholder="Your ideas will appear here. You can also type or edit directly…"
-        aria-label="Document editor"
-      ></div>
-    </div>
-  </main>
+    <div id="sidebarBackdrop" class="sidebar-backdrop" hidden></div>
 
-  <footer class="app-footer">
-    <div class="footer-info">
-      <span id="saveState" class="save-state">Saved</span>
-      <span id="wordCount" class="word-count">0 words</span>
-    </div>
-    <button id="recordBtn" class="record-btn" aria-pressed="false">
-      <span class="record-icon"></span>
-      <span class="record-label">Record</span>
-    </button>
-  </footer>
+    <main class="app-main">
+      <div class="note-titlebar">
+        <input
+          id="noteTitle"
+          class="note-title"
+          type="text"
+          placeholder="Untitled note"
+          aria-label="Note title"
+        />
+      </div>
+
+      <div id="status" class="status" aria-live="polite">Ready. Click Record to start.</div>
+
+      <div class="editor-wrap">
+        <div
+          id="editor"
+          class="editor"
+          contenteditable="true"
+          spellcheck="true"
+          data-placeholder="Your ideas will appear here. You can also type or edit directly…"
+          aria-label="Document editor"
+        ></div>
+      </div>
+
+      <footer class="app-footer">
+        <div class="footer-info">
+          <span id="saveState" class="save-state">Saved</span>
+          <span id="wordCount" class="word-count">0 words</span>
+        </div>
+        <button id="recordBtn" class="record-btn" aria-pressed="false">
+          <span class="record-icon"></span>
+          <span class="record-label">Record</span>
+        </button>
+      </footer>
+    </main>
+  </div>
 
   <script type="module" src="app.js"></script>
 </body>

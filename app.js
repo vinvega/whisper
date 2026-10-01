@@ -11,8 +11,18 @@ env.allowLocalModels = false;
 
 // Whisper expects 16 kHz mono audio.
 const WHISPER_SAMPLE_RATE = 16000;
-const STORAGE_KEY = "voice-notes:document";
+
+// Storage layout:
+//   voice-notes:index    -> JSON array of { id, title, updatedAt }
+//   voice-notes:note:ID  -> the note body (plain text)
+//   voice-notes:active   -> id of the currently open note
+//   voice-notes:model    -> selected model id
+//   voice-notes:document -> (legacy) single-document body, migrated on load
+const INDEX_KEY = "voice-notes:index";
+const NOTE_PREFIX = "voice-notes:note:";
+const ACTIVE_KEY = "voice-notes:active";
 const MODEL_KEY = "voice-notes:model";
+const LEGACY_KEY = "voice-notes:document";
 
 // ---- DOM references ----
 const els = {
@@ -25,6 +35,12 @@ const els = {
   saveState: document.getElementById("saveState"),
   wordCount: document.getElementById("wordCount"),
   recordBtn: document.getElementById("recordBtn"),
+  sidebar: document.getElementById("sidebar"),
+  sidebarToggle: document.getElementById("sidebarToggle"),
+  sidebarBackdrop: document.getElementById("sidebarBackdrop"),
+  notesList: document.getElementById("notesList"),
+  newNoteBtn: document.getElementById("newNoteBtn"),
+  noteTitle: document.getElementById("noteTitle"),
 };
 
 // ---- App state ----
@@ -36,6 +52,10 @@ let mediaRecorder = null;
 let audioChunks = [];
 let recording = false;
 let saveTimer = null;
+
+// Notes state
+let notesIndex = [];   // [{ id, title, updatedAt }]
+let activeId = null;   // id of the open note
 
 // ---------------------------------------------------------------------------
 // UI helpers
@@ -64,12 +84,82 @@ function updateWordCount() {
 }
 
 // ---------------------------------------------------------------------------
-// Persistence (localStorage, debounced)
+// Notes model (localStorage)
 // ---------------------------------------------------------------------------
-function loadDocument() {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved) els.editor.innerText = saved;
+function newId() {
+  return "n_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 7);
+}
+
+function loadIndex() {
+  try {
+    notesIndex = JSON.parse(localStorage.getItem(INDEX_KEY)) || [];
+  } catch {
+    notesIndex = [];
+  }
+}
+
+function saveIndex() {
+  localStorage.setItem(INDEX_KEY, JSON.stringify(notesIndex));
+}
+
+function getNoteBody(id) {
+  return localStorage.getItem(NOTE_PREFIX + id) || "";
+}
+
+function setNoteBody(id, body) {
+  localStorage.setItem(NOTE_PREFIX + id, body);
+}
+
+// Derive a title from the first non-empty line of the body.
+function deriveTitle(body) {
+  const firstLine = (body || "").split("\n").map((l) => l.trim()).find(Boolean);
+  if (!firstLine) return "Untitled note";
+  return firstLine.length > 60 ? firstLine.slice(0, 60) + "…" : firstLine;
+}
+
+function indexEntry(id) {
+  return notesIndex.find((n) => n.id === id);
+}
+
+function createNote(initialBody = "") {
+  const id = newId();
+  setNoteBody(id, initialBody);
+  notesIndex.unshift({ id, title: deriveTitle(initialBody), updatedAt: Date.now() });
+  saveIndex();
+  return id;
+}
+
+function deleteNote(id) {
+  localStorage.removeItem(NOTE_PREFIX + id);
+  notesIndex = notesIndex.filter((n) => n.id !== id);
+  saveIndex();
+}
+
+// Migrate the old single-document storage into the first note (one-time).
+function migrateLegacy() {
+  const legacy = localStorage.getItem(LEGACY_KEY);
+  if (legacy !== null) {
+    const id = createNote(legacy);
+    localStorage.removeItem(LEGACY_KEY);
+    return id;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Active note + persistence (debounced)
+// ---------------------------------------------------------------------------
+function openNote(id) {
+  const entry = indexEntry(id);
+  if (!entry) return;
+  activeId = id;
+  localStorage.setItem(ACTIVE_KEY, id);
+  els.editor.innerText = getNoteBody(id);
+  els.noteTitle.value = entry.title === "Untitled note" ? "" : entry.title;
   updateWordCount();
+  els.saveState.textContent = "Saved";
+  els.saveState.className = "save-state saved";
+  renderNotesList();
 }
 
 function markSaving() {
@@ -77,14 +167,143 @@ function markSaving() {
   els.saveState.className = "save-state saving";
 }
 
+// Persist the active note body and refresh its index entry.
 function scheduleSave() {
+  if (!activeId) return;
   markSaving();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
-    localStorage.setItem(STORAGE_KEY, els.editor.innerText);
+    const body = els.editor.innerText;
+    setNoteBody(activeId, body);
+    const entry = indexEntry(activeId);
+    if (entry) {
+      // If the user hasn't set a custom title, keep it derived from the body.
+      const custom = els.noteTitle.value.trim();
+      entry.title = custom || deriveTitle(body);
+      entry.updatedAt = Date.now();
+      // Move most-recently-edited note to the top.
+      notesIndex = [entry, ...notesIndex.filter((n) => n.id !== activeId)];
+      saveIndex();
+    }
     els.saveState.textContent = "Saved";
     els.saveState.className = "save-state saved";
+    renderNotesList();
   }, 400);
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar rendering & interaction
+// ---------------------------------------------------------------------------
+function formatTime(ts) {
+  const d = new Date(ts);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  return sameDay
+    ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
+function renderNotesList() {
+  els.notesList.innerHTML = "";
+  if (notesIndex.length === 0) {
+    const empty = document.createElement("li");
+    empty.className = "note-item-preview";
+    empty.style.padding = "10px";
+    empty.textContent = "No notes yet.";
+    els.notesList.appendChild(empty);
+    return;
+  }
+
+  for (const note of notesIndex) {
+    const li = document.createElement("li");
+    li.className = "note-item" + (note.id === activeId ? " active" : "");
+    li.dataset.id = note.id;
+
+    const main = document.createElement("div");
+    main.className = "note-item-main";
+
+    const title = document.createElement("div");
+    title.className = "note-item-title";
+    title.textContent = note.title || "Untitled note";
+
+    const preview = document.createElement("div");
+    preview.className = "note-item-preview";
+    const body = getNoteBody(note.id).replace(/\s+/g, " ").trim();
+    preview.textContent = body.slice(0, 80) || "Empty";
+
+    const time = document.createElement("div");
+    time.className = "note-item-time";
+    time.textContent = formatTime(note.updatedAt);
+
+    main.append(title, preview, time);
+
+    const del = document.createElement("button");
+    del.className = "note-delete";
+    del.title = "Delete note";
+    del.setAttribute("aria-label", "Delete note");
+    del.textContent = "×";
+    del.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onDeleteNote(note.id);
+    });
+
+    li.append(main, del);
+    li.addEventListener("click", () => {
+      if (note.id !== activeId) openNote(note.id);
+      if (isOverlayMode()) closeSidebar();
+    });
+
+    els.notesList.appendChild(li);
+  }
+}
+
+function onDeleteNote(id) {
+  const entry = indexEntry(id);
+  const label = entry && entry.title ? `"${entry.title}"` : "this note";
+  if (!confirm(`Delete ${label}? This can't be undone.`)) return;
+
+  const wasActive = id === activeId;
+  deleteNote(id);
+
+  if (wasActive) {
+    if (notesIndex.length === 0) {
+      activeId = createNote("");
+    }
+    openNote(notesIndex[0].id);
+  } else {
+    renderNotesList();
+  }
+  setStatus("Note deleted.");
+}
+
+function onNewNote() {
+  const id = createNote("");
+  openNote(id);
+  els.noteTitle.focus();
+  if (isOverlayMode()) closeSidebar();
+  setStatus("New note created.");
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar visibility
+// ---------------------------------------------------------------------------
+function isOverlayMode() {
+  return window.matchMedia("(max-width: 720px)").matches;
+}
+
+function openSidebar() {
+  els.sidebar.classList.remove("collapsed");
+  if (isOverlayMode()) els.sidebarBackdrop.hidden = false;
+}
+
+function closeSidebar() {
+  els.sidebar.classList.add("collapsed");
+  els.sidebarBackdrop.hidden = true;
+}
+
+function toggleSidebar() {
+  if (els.sidebar.classList.contains("collapsed")) openSidebar();
+  else closeSidebar();
 }
 
 // ---------------------------------------------------------------------------
@@ -236,8 +455,16 @@ function appendText(text) {
 }
 
 // ---------------------------------------------------------------------------
-// Export & New
+// Export (current note)
 // ---------------------------------------------------------------------------
+function slugify(s) {
+  return (s || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+}
+
 function exportTxt() {
   const text = els.editor.innerText;
   if (!text.trim()) {
@@ -247,23 +474,16 @@ function exportTxt() {
   const blob = new Blob([text], { type: "text/plain" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
+  const entry = indexEntry(activeId);
+  const base = slugify(entry && entry.title) || "voice-note";
   const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-");
   a.href = url;
-  a.download = `voice-note-${stamp}.txt`;
+  a.download = `${base}-${stamp}.txt`;
   a.click();
   URL.revokeObjectURL(url);
 }
 
-function newNote() {
-  if (els.editor.innerText.trim() && !confirm("Clear the current note? This can't be undone.")) {
-    return;
-  }
-  els.editor.innerText = "";
-  localStorage.removeItem(STORAGE_KEY);
-  updateWordCount();
-  setStatus("Started a new note.");
-  els.editor.focus();
-}
+
 
 // ---------------------------------------------------------------------------
 // Wiring
@@ -279,7 +499,21 @@ els.editor.addEventListener("input", () => {
 });
 
 els.exportBtn.addEventListener("click", exportTxt);
-els.newBtn.addEventListener("click", newNote);
+els.newBtn.addEventListener("click", onNewNote);
+els.newNoteBtn.addEventListener("click", onNewNote);
+
+// Title edits save to the active note's index entry.
+els.noteTitle.addEventListener("input", scheduleSave);
+els.noteTitle.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    els.editor.focus();
+  }
+});
+
+// Sidebar toggles.
+els.sidebarToggle.addEventListener("click", toggleSidebar);
+els.sidebarBackdrop.addEventListener("click", closeSidebar);
 
 els.modelSelect.addEventListener("change", () => {
   transcriber = null; // force reload on next use
@@ -287,11 +521,24 @@ els.modelSelect.addEventListener("change", () => {
   setStatus(`Model set to ${els.modelSelect.value.split("/")[1]}. It loads on next recording.`);
 });
 
-// Restore saved model choice and document on startup.
+// Restore saved model choice.
 if ([...els.modelSelect.options].some((o) => o.value === currentModel)) {
   els.modelSelect.value = currentModel;
 }
-loadDocument();
+
+// --- Startup: load notes, migrate legacy, open an active note ---
+loadIndex();
+migrateLegacy();
+if (notesIndex.length === 0) {
+  createNote("");
+}
+const savedActive = localStorage.getItem(ACTIVE_KEY);
+const startId = indexEntry(savedActive) ? savedActive : notesIndex[0].id;
+openNote(startId);
+
+// On mobile, start with the sidebar collapsed so the editor is front and center.
+if (isOverlayMode()) closeSidebar();
+
 setStatus("Ready. Click Record to start (model downloads once on first use).");
 
 // Register the service worker for offline support.

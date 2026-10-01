@@ -87,6 +87,144 @@ select, .btn {
 }
 
 .btn.ghost:hover { border-color: var(--accent); color: var(--accent-hover); }
+.btn.small { padding: 5px 10px; font-size: 13px; }
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  cursor: pointer;
+}
+.icon-btn:hover { border-color: var(--accent); }
+
+.hamburger,
+.hamburger::before,
+.hamburger::after {
+  display: block;
+  width: 16px;
+  height: 2px;
+  background: currentColor;
+  position: relative;
+}
+.hamburger::before,
+.hamburger::after {
+  content: "";
+  position: absolute;
+  left: 0;
+}
+.hamburger::before { top: -5px; }
+.hamburger::after { top: 5px; }
+
+/* Body: sidebar + main */
+.app-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Sidebar */
+.sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+}
+.sidebar.collapsed { display: none; }
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.sidebar-title {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.notes-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.note-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.note-item:hover { background: var(--bg); }
+.note-item.active {
+  background: var(--bg);
+  border-color: var(--accent);
+}
+
+.note-item-main { flex: 1; min-width: 0; }
+.note-item-title {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.note-item-preview {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+.note-item-time {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 3px;
+}
+
+.note-delete {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 6px;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.note-item:hover .note-delete { opacity: 1; }
+.note-delete:hover { background: var(--rec); color: #fff; }
+
+.sidebar-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 5;
+}
 
 /* Main / editor */
 .app-main {
@@ -97,6 +235,21 @@ select, .btn {
   gap: 12px;
   overflow: hidden;
 }
+
+.note-titlebar { display: flex; }
+.note-title {
+  flex: 1;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 6px 8px;
+  outline: none;
+}
+.note-title:hover { border-color: var(--border); }
+.note-title:focus { border-color: var(--accent); background: var(--panel); }
 
 .status {
   font-size: 13px;
@@ -190,8 +343,22 @@ select, .btn {
 
 @keyframes blink { 50% { opacity: 0.4; } }
 
+/* On narrow screens the sidebar overlays the content instead of pushing it. */
+@media (max-width: 720px) {
+  .sidebar {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 6;
+    box-shadow: 2px 0 12px rgba(0, 0, 0, 0.4);
+  }
+}
+
 @media (max-width: 520px) {
   .brand h1 { font-size: 16px; }
   select, .btn { padding: 6px 9px; font-size: 13px; }
   .editor { font-size: 16px; padding: 14px; }
+  .note-title { font-size: 18px; }
+  .sidebar { width: 82vw; max-width: 300px; }
 }

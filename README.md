@@ -6,7 +6,8 @@ so after the first load there is no internet, no server, and no cost.
 
 - Record your voice, get text appended to an editable document
 - Edit and type by hand too
-- Auto-saves to the browser; export any time as `.txt`
+- Keep multiple notes, selectable from a sidebar (create, rename, delete)
+- Auto-saves to the browser; export the current note any time as `.txt`
 - Installs to the Chromebook shelf and runs offline
 
 ## Files
@@ -68,3 +69,14 @@ If transcription feels slow on your Chromebook, switch to `tiny.en`.
   IDs in `app.js` to the multilingual variants (e.g. `Xenova/whisper-base`).
 - Everything stays on the device. Notes are saved in the browser's local storage
   for this site; clearing site data will remove them, so export anything important.
+
+## Working with multiple notes
+
+- Open the sidebar with the menu button (top left). On narrow screens it slides
+  over the editor; on wider screens it sits alongside.
+- **+ New** (sidebar) or **New** (header) creates a fresh note.
+- Click a note in the list to open it. The most recently edited note moves to the top.
+- Rename a note by editing the title field above the editor. If you leave the title
+  blank, it's derived automatically from the note's first line.
+- Hover a note in the list and click **×** to delete it.
+- The active note is remembered, so reopening the app returns you to it.
