@@ -69,12 +69,18 @@ let startingRecording = false; // guards the async gap while a start is in progr
 let stopping = false;          // guards against repeated Stop clicks
 let saveTimer = null;
 
-// Live (chunked near-real-time) transcription config/state.
+// Live (near-real-time) transcription config/state.
+// Approach: overlapping advancing windows, append-only. Each pass transcribes a
+// window of recent audio that includes a few seconds of already-committed audio
+// as lead-in CONTEXT (so Whisper can disambiguate words at the boundary), then
+// stitches the result against the committed text to append only the new words.
 const LIVE_KEY = "voice-notes:live";
-const LIVE_INTERVAL_MS = 3000;        // how often to re-transcribe the session
-const LIVE_MAX_SESSION_SEC = 90;      // cap a single live session's audio length
+const LIVE_INTERVAL_MS = 4000;        // how often to process a new window
+const LIVE_OVERLAP_SEC = 4;           // lead-in context carried into each window
+const LIVE_MIN_NEW_SEC = 2;           // require this much new audio before a pass
 let liveMode = localStorage.getItem(LIVE_KEY) === "1";
-let liveTimer = null;                 // interval that triggers re-transcription
+let liveTimer = null;                 // interval that triggers each window pass
+let processedSec = 0;                 // seconds of audio already committed
 let liveInFlight = false;             // single-flight guard: one inference at a time
 let liveStream = null;                // active mic stream in live mode
 let committedText = "";               // editor text that existed before this session
@@ -618,38 +624,34 @@ function startStopRecording(stream) {
   setStatus("Recording… click Stop when you're done.", "active");
 }
 
-// --- Mode 2: live chunked near-real-time transcription ---
+// --- Mode 2: live near-real-time transcription (overlapping windows) ---
 function startLiveRecording(stream) {
-  // Snapshot the text already in the editor; the session's interim text is
-  // appended after it and refreshed on each pass.
+  // committedText is the authoritative appended text; we never rewrite it.
   committedText = els.editor.innerText.replace(/\s+$/, "");
-  interimText = "";
+  processedSec = 0;
 
   mediaRecorder.onstop = async () => {
     stream.getTracks().forEach((t) => t.stop());
     clearInterval(liveTimer);
     liveTimer = null;
-    // One final pass to catch the tail, then commit the result permanently.
-    await runLivePass(true);
+    // Final pass over whatever remains, then persist.
+    await runLiveWindow(true);
     setDot("ready");
+    scheduleSave();
+    setStatus("Live transcription saved.");
     finishStop();
   };
 
-  // Emit data periodically so audioChunks fills during the session.
-  mediaRecorder.start(1000);
+  mediaRecorder.start(1000); // emit data every second so audioChunks fills
   setStatus("Live… transcribing as you speak. Click Stop to finish.", "active");
 
-  liveTimer = setInterval(() => {
-    runLivePass(false);
-  }, LIVE_INTERVAL_MS);
+  liveTimer = setInterval(() => runLiveWindow(false), LIVE_INTERVAL_MS);
 }
 
-// Transcribe the whole current session's audio and update the editor's interim
-// portion. Transcribing the full session (not just the newest slice) keeps
-// Whisper seeing complete audio so words aren't clipped at chunk boundaries.
-async function runLivePass(isFinal) {
-  // Single-flight: if a pass is still running, skip this tick (graceful on slow HW).
-  if (liveInFlight) return;
+// Process one advancing window: transcribe [processedSec - overlap .. end],
+// append only the genuinely new words (via stitching), advance processedSec.
+async function runLiveWindow(isFinal) {
+  if (liveInFlight) return;               // single-flight: skip if busy
   if (audioChunks.length === 0) return;
 
   liveInFlight = true;
@@ -657,46 +659,93 @@ async function runLivePass(isFinal) {
 
   try {
     const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
-    const model = await ensureModel();
     const audio = await blobToWhisperAudio(blob);
+    const totalSec = audio.length / WHISPER_SAMPLE_RATE;
 
-    // Cap how much audio we feed in so very long sessions stay responsive.
-    const maxSamples = WHISPER_SAMPLE_RATE * LIVE_MAX_SESSION_SEC;
-    const clip = audio.length > maxSamples ? audio.slice(-maxSamples) : audio;
-
-    if (clip.length >= WHISPER_SAMPLE_RATE * 0.3) {
-      const result = await model(clip);
-      interimText = (result.text || "").trim();
-      renderLiveText();
+    const newSec = totalSec - processedSec;
+    // Wait until there's enough fresh audio (unless this is the final flush).
+    if (!isFinal && newSec < LIVE_MIN_NEW_SEC) {
+      liveInFlight = false;
+      setDot("ready");
+      return;
     }
+
+    // Window = overlap of already-processed audio (context) + the new audio.
+    const startSec = Math.max(0, processedSec - LIVE_OVERLAP_SEC);
+    const startSample = Math.floor(startSec * WHISPER_SAMPLE_RATE);
+    const windowAudio = audio.subarray(startSample);
+
+    if (windowAudio.length >= WHISPER_SAMPLE_RATE * 0.3) {
+      const model = await ensureModel();
+      const result = await model(windowAudio);
+      const text = cleanTranscript(result.text || "");
+      if (text) {
+        appendStitched(text);
+      }
+    }
+    processedSec = totalSec;
   } catch (err) {
     setStatus(`Live transcription error: ${err.message}`, "error");
   } finally {
     liveInFlight = false;
-  }
-
-  if (isFinal) {
-    commitLiveText();
+    if (!isFinal) setDot("ready");
   }
 }
 
-// Show committed + interim text together while a live session is active.
-function renderLiveText() {
-  const sep = committedText && interimText ? " " : "";
-  els.editor.innerText = committedText + sep + interimText;
+// Append `incoming` to committedText, dropping the overlap: the window re-covers
+// a few seconds already committed, so `incoming` tends to repeat the tail of
+// committedText. Find the longest word-level overlap (committed suffix == incoming
+// prefix) and append only the remainder.
+function appendStitched(incoming) {
+  if (!committedText) {
+    committedText = incoming;
+  } else {
+    const remainder = dropOverlap(committedText, incoming);
+    if (!remainder) {
+      liveRender();
+      return;
+    }
+    const sep = /\s$/.test(committedText) ? "" : " ";
+    committedText = (committedText + sep + remainder).replace(/\s+$/, "");
+  }
+  liveRender();
+}
+
+// Return the part of `incoming` that is NOT already present as a trailing overlap
+// of `committed`. Word-based, case-insensitive on the comparison only.
+function dropOverlap(committed, incoming) {
+  const cWords = committed.split(/\s+/).filter(Boolean);
+  const iWords = incoming.split(/\s+/).filter(Boolean);
+  const norm = (w) => w.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
+
+  const maxK = Math.min(cWords.length, iWords.length);
+  let bestK = 0;
+  // Largest k where the last k committed words equal the first k incoming words.
+  for (let k = maxK; k >= 1; k--) {
+    let match = true;
+    for (let j = 0; j < k; j++) {
+      if (norm(cWords[cWords.length - k + j]) !== norm(iWords[j])) { match = false; break; }
+    }
+    if (match) { bestK = k; break; }
+  }
+  return iWords.slice(bestK).join(" ");
+}
+
+function liveRender() {
+  els.editor.innerText = committedText;
   updateWordCount();
   els.editor.scrollTop = els.editor.scrollHeight;
 }
 
-// Fold the interim text into the committed text and persist.
-function commitLiveText() {
-  const sep = committedText && interimText ? " " : "";
-  committedText = (committedText + sep + interimText).replace(/\s+$/, "");
-  interimText = "";
-  els.editor.innerText = committedText;
-  updateWordCount();
-  scheduleSave();
-  setStatus("Live transcription saved.");
+// Strip Whisper's non-speech annotations and silence markers, e.g.
+// "(keyboard clicking)", "[BLANK_AUDIO]", "(typing)", "[ Silence ]", "♪ ... ♪".
+function cleanTranscript(text) {
+  return text
+    .replace(/\([^)]*\)/g, " ")      // (keyboard clicking), (typing), (music)
+    .replace(/\[[^\]]*\]/g, " ")     // [BLANK_AUDIO], [ Silence ], [noise]
+    .replace(/♪+/g, " ")             // music notes
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function stopRecording() {
@@ -761,7 +810,7 @@ async function transcribeBlob(blob) {
     }
 
     const result = await model(audio);
-    const text = (result.text || "").trim();
+    const text = cleanTranscript(result.text || "");
 
     if (text) {
       appendText(text);
@@ -1207,11 +1256,24 @@ els.readToggle.addEventListener("change", () => {
 els.liveToggle.addEventListener("change", () => {
   liveMode = els.liveToggle.checked;
   localStorage.setItem(LIVE_KEY, liveMode ? "1" : "0");
-  setStatus(
-    liveMode
-      ? "Live mode on. Text appears as you speak (tiny.en recommended for speed)."
-      : "Live mode off. Transcribes once when you click Stop."
-  );
+
+  if (liveMode) {
+    // Live benefits from the fastest model; switch to tiny.en if on something
+    // heavier, so per-window inference keeps up on modest hardware.
+    const TINY = "Xenova/whisper-tiny.en";
+    if (els.modelSelect.value !== TINY) {
+      els.modelSelect.value = TINY;
+      currentModel = TINY;
+      localStorage.setItem(MODEL_KEY, TINY);
+      transcriber = null; // force reload with the new model on next use
+      setDot("");
+      setStatus("Live mode on, switched to tiny.en for speed. Text appears as you speak.");
+    } else {
+      setStatus("Live mode on. Text appears as you speak.");
+    }
+  } else {
+    setStatus("Live mode off. Transcribes the whole recording once on Stop (higher accuracy).");
+  }
 });
 
 // Sidebar toggles.

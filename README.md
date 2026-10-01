@@ -72,22 +72,32 @@ If transcription feels slow on your Chromebook, switch to `tiny.en`.
 Use the **Live** toggle in the header to choose how transcription happens:
 
 - **Live off (default):** you record, then transcription runs once when you click
-  **Stop**. Most reliable, lowest CPU use, best accuracy per recording.
-- **Live on:** text appears as you speak. The app re-transcribes the session
-  every few seconds and updates the editor (near-real-time, chunked).
+  **Stop**. This transcribes the whole recording in one pass with full context, so
+  it's the **most accurate** option and uses the least CPU.
+- **Live on:** text appears as you speak, appended as you go.
 
-How Live works and its limits:
+How Live works:
 
-- Whisper isn't a true word-by-word streaming model, so Live re-transcribes the
-  whole current session each pass. That keeps words from being clipped at chunk
-  boundaries, at the cost of more CPU.
-- Only one transcription runs at a time. If your Chromebook can't keep up, extra
-  passes are skipped rather than queued, so it degrades gracefully.
-- A single live session's audio is capped (about 90s is fed to the model) to stay
-  responsive; the committed text is kept, so longer dictation still works.
-- On modest hardware, use `tiny.en` with Live for the smoothest experience.
-- Avoid typing in the editor during a live session — the next pass rewrites the
-  in-progress text. Edit freely once you've stopped.
+- Whisper isn't a true word-by-word streaming model. Live processes **overlapping
+  windows** of recent audio: each pass transcribes the newest few seconds plus a
+  short lead-in of already-committed audio for context, then **appends only the new
+  words** (it stitches away the overlap). Earlier text is never rewritten.
+- The lead-in overlap preserves most of the local context Whisper uses to
+  disambiguate words, while keeping each pass small and roughly constant-time — so
+  it won't bog down or lock up as the session grows.
+- Only one pass runs at a time; if your device can't keep up, passes are skipped
+  rather than queued.
+- Non-speech noise that Whisper annotates — `(keyboard clicking)`, `[BLANK_AUDIO]`,
+  `(typing)`, music notes — is filtered out automatically (in both modes).
+- Turning Live on switches the model to **`tiny.en`** for responsiveness. You can
+  change it back, but heavier models may lag in Live on modest hardware.
+
+Accuracy tradeoff: Live never sees the full arc of what you said, so it's slightly
+less accurate than **Live off**, which transcribes the complete recording at once.
+Use Live to watch ideas appear as you talk; use Live off when accuracy matters most.
+
+Tip: avoid typing in the editor during a live session — new text is appended at the
+end as windows are processed. Edit freely once you've stopped.
 
 ## Choosing a microphone
 
@@ -192,8 +202,9 @@ Rough notes for where this could go next, roughly easiest to hardest:
   cap and store audio/attachments.
 - **Richer conflict view:** show a side-by-side diff of the app vs. folder version
   before choosing Keep mine / Load from folder.
-- **Silence-based live chunking:** split live transcription on natural pauses
-  instead of a fixed interval, for cleaner phrase boundaries.
+- **Silence-based live chunking:** Live currently advances on a fixed interval with
+  overlapping windows. Splitting on natural pauses (silence detection via the Web
+  Audio API) could give cleaner phrase boundaries and avoid cutting mid-word.
 - **Two-way sync with real merge:** currently conflicts are last-writer-wins with a
   `.bak` safety net. A proper merge (or version history) would be the big step.
   Options considered and deferred: an in-browser `git` (isomorphic-git) — rejected
