@@ -12,6 +12,7 @@ so after the first load there is no internet, no server, and no cost.
 - Optional folder sync: mirror notes to `.txt` files (e.g. in Google Drive), with
   protection against overwriting edits made outside the app
 - Auto-saves to the browser; export the current note any time as `.txt`
+- Keyboard shortcuts for new note, search, export, sidebar, and recording
 - Installs to the Chromebook shelf and runs offline
 
 ## Files
@@ -111,6 +112,16 @@ How Live works and its limits:
   The order you set is saved. Editing a note no longer changes its position, so
   your manual order sticks. (Reordering is disabled while a search is active.)
 
+## Keyboard shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl/Cmd + N` | New note |
+| `Ctrl/Cmd + F` | Focus the search box (opens the sidebar if collapsed) |
+| `Ctrl/Cmd + S` | Export the current note as `.txt` |
+| `Ctrl/Cmd + B` | Show/hide the sidebar |
+| `Space` | Start/stop recording — only when you're not typing in the editor, title, or search box |
+
 ## Folder sync (save notes as files, e.g. to Google Drive)
 
 The app can mirror your notes to plain `.txt` files in a folder you choose. On a
@@ -156,8 +167,8 @@ conflicts always leave a recoverable `.bak` copy.
 - Conflict handling detects *that* a file changed, not *what* changed, and does not
   auto-merge. If you edited both the app and the file, you pick one (both are kept
   — the other side is preserved as a `.bak`).
-- One note maps to one file; renaming a note writes a new file (the old one is left
-  behind until you clean it up).
+- One note maps to one file. Renaming a note writes the file under the new name and
+  removes the old one automatically (the stable id in the filename makes this safe).
 
 ## Ideas for future improvement
 
@@ -165,8 +176,6 @@ Rough notes for where this could go next, roughly easiest to hardest:
 
 - **Keyboard shortcuts:** focus search, start/stop recording, new note.
 - **Import `.txt` files** from the connected folder as new notes (bulk read-in).
-- **Clean up renamed files:** when a note's title changes, remove the old
-  `<old-title>__<id>.txt` instead of leaving it behind.
 - **IndexedDB as the primary store** (instead of localStorage) to lift the ~5MB
   cap and store audio/attachments.
 - **Richer conflict view:** show a side-by-side diff of the app vs. folder version

@@ -871,10 +871,16 @@ async function restoreFolder() {
 }
 
 // --- read a note's file, returning { text, lastModified, size } or null ---
+// The file we last wrote for this note (survives title/slug changes). Falls back
+// to the computed name for notes written before filename tracking existed.
+function syncedFileName(entry) {
+  return (entry.sync && entry.sync.fileName) || noteFileName(entry);
+}
+
 async function readNoteFile(entry) {
   if (!dirHandle) return null;
   try {
-    const fh = await dirHandle.getFileHandle(noteFileName(entry));
+    const fh = await dirHandle.getFileHandle(syncedFileName(entry));
     const file = await fh.getFile();
     const text = await file.text();
     return { text, lastModified: file.lastModified, size: file.size };
@@ -894,13 +900,26 @@ async function isExternallyChanged(entry) {
 
 // Write one note's body to its file, recording the resulting file stamp.
 async function writeNoteFile(entry, body) {
-  const fh = await dirHandle.getFileHandle(noteFileName(entry), { create: true });
+  const newName = noteFileName(entry);
+  const oldName = entry.sync && entry.sync.fileName;
+
+  const fh = await dirHandle.getFileHandle(newName, { create: true });
   const w = await fh.createWritable();
   await w.write(body);
   await w.close();
   const file = await fh.getFile();
-  entry.sync = { lastModified: file.lastModified, size: file.size };
+  entry.sync = { lastModified: file.lastModified, size: file.size, fileName: newName };
   saveIndex();
+
+  // If the note was renamed, the filename changed (the stable id suffix stays).
+  // Remove the orphaned old file now that the new one is written successfully.
+  if (oldName && oldName !== newName) {
+    try {
+      await dirHandle.removeEntry(oldName);
+    } catch {
+      /* old file may already be gone; ignore */
+    }
+  }
 }
 
 // Sync a single note (called from scheduleSave). Guards against clobbering.
@@ -946,7 +965,7 @@ async function syncAllNotes() {
 async function deleteNoteFile(entry) {
   if (!dirHandle || !entry) return;
   try {
-    await dirHandle.removeEntry(noteFileName(entry));
+    await dirHandle.removeEntry(syncedFileName(entry));
   } catch {
     /* file may not exist; ignore */
   }
@@ -1127,6 +1146,58 @@ openNote(startId);
 if (isOverlayMode()) closeSidebar();
 
 setStatus("Ready. Click Record to start (model downloads once on first use).");
+
+// ---------------------------------------------------------------------------
+// Keyboard shortcuts
+//   Ctrl/Cmd + N  new note
+//   Ctrl/Cmd + F  focus search
+//   Ctrl/Cmd + S  export current note
+//   Ctrl/Cmd + B  toggle sidebar
+//   Space         start/stop recording (only when not typing in a field)
+// ---------------------------------------------------------------------------
+function isTypingTarget(el) {
+  if (!el) return false;
+  if (el === els.editor) return true;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
+}
+
+document.addEventListener("keydown", (e) => {
+  const mod = e.ctrlKey || e.metaKey;
+
+  if (mod && !e.shiftKey && !e.altKey) {
+    const key = e.key.toLowerCase();
+    if (key === "n") {
+      e.preventDefault();
+      onNewNote();
+      return;
+    }
+    if (key === "f") {
+      e.preventDefault();
+      if (els.sidebar.classList.contains("collapsed")) openSidebar();
+      els.searchInput.focus();
+      els.searchInput.select();
+      return;
+    }
+    if (key === "s") {
+      e.preventDefault();
+      exportTxt();
+      return;
+    }
+    if (key === "b") {
+      e.preventDefault();
+      toggleSidebar();
+      return;
+    }
+  }
+
+  // Space toggles recording, but only when the user isn't typing somewhere.
+  if ((e.key === " " || e.code === "Space") && !isTypingTarget(e.target)) {
+    e.preventDefault();
+    if (recording) stopRecording();
+    else startRecording();
+  }
+});
 
 // Register the service worker for offline support.
 if ("serviceWorker" in navigator) {
