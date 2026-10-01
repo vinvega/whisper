@@ -65,6 +65,8 @@ let selectedMicId = localStorage.getItem(MIC_KEY) || "";
 let mediaRecorder = null;
 let audioChunks = [];
 let recording = false;
+let startingRecording = false; // guards the async gap while a start is in progress
+let stopping = false;          // guards against repeated Stop clicks
 let saveTimer = null;
 
 // Live (chunked near-real-time) transcription config/state.
@@ -567,11 +569,15 @@ async function populateMicList() {
 // Audio: record -> decode -> resample to 16kHz mono Float32 -> transcribe
 // ---------------------------------------------------------------------------
 async function startRecording() {
+  if (startingRecording || recording || stopping) return;
+  startingRecording = true;
+
   let stream;
   try {
     stream = await getMicStream();
   } catch (err) {
     setStatus(`Microphone access denied: ${err.message}`, "error");
+    startingRecording = false;
     return;
   }
 
@@ -597,6 +603,7 @@ async function startRecording() {
 
   recording = true;
   setRecordingUI(true);
+  startingRecording = false;
 }
 
 // --- Mode 1: record then transcribe once on Stop (original behavior) ---
@@ -605,6 +612,7 @@ function startStopRecording(stream) {
     stream.getTracks().forEach((t) => t.stop());
     const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
     await transcribeBlob(blob);
+    finishStop();
   };
   mediaRecorder.start();
   setStatus("Recording… click Stop when you're done.", "active");
@@ -624,6 +632,7 @@ function startLiveRecording(stream) {
     // One final pass to catch the tail, then commit the result permanently.
     await runLivePass(true);
     setDot("ready");
+    finishStop();
   };
 
   // Emit data periodically so audioChunks fills during the session.
@@ -691,12 +700,30 @@ function commitLiveText() {
 }
 
 function stopRecording() {
-  if (mediaRecorder && recording) {
-    mediaRecorder.stop();
-    recording = false;
-    setRecordingUI(false);
-    setStatus(liveMode ? "Finishing up…" : "Transcribing…", "active");
+  // Idempotent: a second call (e.g. from frantic multi-clicking) does nothing.
+  if (stopping || !recording) return;
+
+  // Flip state and UI synchronously, before any heavy/async work, so the button
+  // reflects the stop immediately and can't be re-triggered into recording.
+  stopping = true;
+  recording = false;
+  setRecordingUI(false);
+  els.recordBtn.disabled = true; // briefly disabled until teardown completes
+  setStatus(liveMode ? "Finishing up…" : "Transcribing…", "active");
+
+  try {
+    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      mediaRecorder.stop(); // triggers onstop, which does the final transcription
+    }
+  } catch {
+    /* already stopped */
   }
+}
+
+// Called from the recorder's onstop handlers once teardown/transcription is done.
+function finishStop() {
+  stopping = false;
+  els.recordBtn.disabled = false;
 }
 
 // Decode compressed audio and resample to the mono 16 kHz Float32 Whisper needs.
@@ -1128,8 +1155,12 @@ function startScanLoop() {
 // Wiring
 // ---------------------------------------------------------------------------
 els.recordBtn.addEventListener("click", () => {
-  if (recording) stopRecording();
-  else startRecording();
+  if (recording) {
+    stopRecording();
+  } else if (!startingRecording && !stopping) {
+    startRecording();
+  }
+  // Extra clicks while starting or stopping are intentionally ignored.
 });
 
 els.editor.addEventListener("input", () => {
@@ -1285,7 +1316,7 @@ document.addEventListener("keydown", (e) => {
   if ((e.key === " " || e.code === "Space") && !isTypingTarget(e.target)) {
     e.preventDefault();
     if (recording) stopRecording();
-    else startRecording();
+    else if (!startingRecording && !stopping) startRecording();
   }
 });
 
