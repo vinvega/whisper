@@ -57,6 +57,34 @@ Any static server works (for example `python -m http.server 8123` if you have Py
 After the first successful online run, the app and model are cached, so it works
 with no internet.
 
+## Deploying to GitHub Pages
+
+This app is static (no build step), so it hosts directly on GitHub Pages, which
+serves over HTTPS — satisfying the secure-context requirement for the microphone,
+File System Access API, and service worker.
+
+1. Push the repo to GitHub.
+2. In the repo: **Settings → Pages → Build and deployment**. Set
+   **Source = Deploy from a branch**, choose your branch (e.g. `main`) and the
+   `/ (root)` folder, then save. No GitHub Actions workflow is needed — the branch
+   deploy mode publishes the files as-is.
+3. After a minute it's live at `https://<user>.github.io/<repo>/`
+   (for this repo: `https://vinvega.github.io/whisper/`).
+
+Notes:
+
+- All paths in the app are **relative**, so it works correctly from the `/<repo>/`
+  subpath (no root-anchored URLs to fix).
+- `.nojekyll` is included so GitHub serves files as-is (Jekyll would otherwise
+  ignore files/folders beginning with an underscore).
+- The site is **public**. There are no secrets in the code (all processing is
+  client-side), and each visitor's notes live only in their own browser.
+- After deploying an update, bump the cache version in `sw.js` (e.g.
+  `voice-notes-shell-v2` → `v3`) so returning visitors get the new files instead of
+  the service worker's cached copy.
+- First load needs internet to fetch the Whisper model + Transformers.js from the
+  CDN; afterward it's cached for offline use.
+
 ## Choosing a model
 
 Use the dropdown in the header:
