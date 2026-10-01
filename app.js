@@ -28,6 +28,7 @@ const LEGACY_KEY = "voice-notes:document";
 const els = {
   statusDot: document.getElementById("statusDot"),
   modelSelect: document.getElementById("modelSelect"),
+  micSelect: document.getElementById("micSelect"),
   exportBtn: document.getElementById("exportBtn"),
   newBtn: document.getElementById("newBtn"),
   status: document.getElementById("status"),
@@ -56,6 +57,10 @@ const els = {
 let transcriber = null;      // the loaded Whisper pipeline
 let loadingModel = false;
 let currentModel = localStorage.getItem(MODEL_KEY) || els.modelSelect.value;
+
+// Selected microphone (empty string = system/browser default).
+const MIC_KEY = "voice-notes:mic";
+let selectedMicId = localStorage.getItem(MIC_KEY) || "";
 
 let mediaRecorder = null;
 let audioChunks = [];
@@ -494,16 +499,84 @@ async function ensureModel() {
 }
 
 // ---------------------------------------------------------------------------
+// Microphone selection
+// ---------------------------------------------------------------------------
+// Open a stream for the chosen mic. If a specific device was picked but is no
+// longer available, fall back to the default rather than failing.
+async function getMicStream() {
+  if (selectedMicId) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: { deviceId: { exact: selectedMicId } },
+      });
+    } catch (err) {
+      // Device gone or not usable — clear it and fall back to default.
+      if (err && (err.name === "OverconstrainedError" || err.name === "NotFoundError")) {
+        setStatus("Chosen microphone unavailable; using the default.", "error");
+        selectedMicId = "";
+        localStorage.removeItem(MIC_KEY);
+        populateMicList();
+      } else {
+        throw err;
+      }
+    }
+  }
+  return navigator.mediaDevices.getUserMedia({ audio: true });
+}
+
+// Populate the mic dropdown from available input devices. Device labels are only
+// exposed after mic permission has been granted at least once; before that they
+// show as generic names.
+async function populateMicList() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+  let devices;
+  try {
+    devices = await navigator.mediaDevices.enumerateDevices();
+  } catch {
+    return;
+  }
+  const mics = devices.filter((d) => d.kind === "audioinput");
+
+  // Rebuild options: always a "Default" entry, then each detected mic.
+  els.micSelect.innerHTML = "";
+  const def = document.createElement("option");
+  def.value = "";
+  def.textContent = "Default microphone";
+  els.micSelect.appendChild(def);
+
+  let i = 1;
+  let selectedStillPresent = false;
+  for (const d of mics) {
+    const opt = document.createElement("option");
+    opt.value = d.deviceId;
+    opt.textContent = d.label || `Microphone ${i}`;
+    if (d.deviceId === selectedMicId) selectedStillPresent = true;
+    els.micSelect.appendChild(opt);
+    i++;
+  }
+
+  // If a previously-saved device is gone, revert the selection to default.
+  if (selectedMicId && !selectedStillPresent) {
+    selectedMicId = "";
+    localStorage.removeItem(MIC_KEY);
+  }
+  els.micSelect.value = selectedMicId;
+}
+
+// ---------------------------------------------------------------------------
 // Audio: record -> decode -> resample to 16kHz mono Float32 -> transcribe
 // ---------------------------------------------------------------------------
 async function startRecording() {
   let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream = await getMicStream();
   } catch (err) {
     setStatus(`Microphone access denied: ${err.message}`, "error");
     return;
   }
+
+  // First successful grant reveals device labels — refresh the picker.
+  populateMicList();
 
   // Warm up the model while the user starts talking.
   ensureModel().catch(() => {});
@@ -1120,6 +1193,20 @@ els.modelSelect.addEventListener("change", () => {
   setStatus(`Model set to ${els.modelSelect.value.split("/")[1]}. It loads on next recording.`);
 });
 
+// Microphone selection.
+els.micSelect.addEventListener("change", () => {
+  selectedMicId = els.micSelect.value;
+  if (selectedMicId) localStorage.setItem(MIC_KEY, selectedMicId);
+  else localStorage.removeItem(MIC_KEY);
+  const label = els.micSelect.options[els.micSelect.selectedIndex].textContent;
+  setStatus(`Microphone set to: ${label}`);
+});
+
+// Refresh the mic list when devices are plugged/unplugged.
+if (navigator.mediaDevices && "ondevicechange" in navigator.mediaDevices) {
+  navigator.mediaDevices.addEventListener("devicechange", populateMicList);
+}
+
 // Restore saved model choice.
 if ([...els.modelSelect.options].some((o) => o.value === currentModel)) {
   els.modelSelect.value = currentModel;
@@ -1127,6 +1214,9 @@ if ([...els.modelSelect.options].some((o) => o.value === currentModel)) {
 
 // Restore live-mode toggle state.
 els.liveToggle.checked = liveMode;
+
+// Populate the microphone list (labels appear after first permission grant).
+populateMicList();
 
 // Set up folder sync UI and try to restore a previously-connected folder.
 reflectSyncUI();

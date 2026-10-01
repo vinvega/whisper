@@ -89,6 +89,10 @@ select, .btn {
 .btn.ghost:hover { border-color: var(--accent); color: var(--accent-hover); }
 .btn.small { padding: 5px 10px; font-size: 13px; }
 
+/* Keep long device names from stretching the header. */
+#micSelect { max-width: 180px; }
+@media (max-width: 520px) { #micSelect { max-width: 130px; } }
+
 /* Live toggle switch */
 .switch {
   display: inline-flex;

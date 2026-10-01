@@ -6,6 +6,7 @@ so after the first load there is no internet, no server, and no cost.
 
 - Record your voice, get text appended to an editable document
 - Two modes: transcribe once on Stop, or **Live** (text appears as you speak)
+- Pick which microphone to use from an in-app dropdown
 - Edit and type by hand too
 - Keep multiple notes, selectable from a sidebar (create, rename, delete)
 - Search/filter notes and drag to reorder them
@@ -87,6 +88,17 @@ How Live works and its limits:
 - On modest hardware, use `tiny.en` with Live for the smoothest experience.
 - Avoid typing in the editor during a live session — the next pass rewrites the
   in-progress text. Edit freely once you've stopped.
+
+## Choosing a microphone
+
+Use the microphone dropdown in the header to pick which input device to record
+from. "Default microphone" uses whatever your OS/browser has selected.
+
+- Device names only appear after you've granted mic permission once; before that
+  they show as generic names. The list refreshes automatically after the first
+  recording and when you plug/unplug a device.
+- Your choice is remembered. If the selected mic is later unavailable (e.g.
+  unplugged), the app falls back to the default rather than failing.
 
 ## Notes & limits
 
