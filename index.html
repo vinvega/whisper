@@ -52,6 +52,21 @@
         />
       </div>
       <ul id="notesList" class="notes-list" aria-label="Saved notes"></ul>
+      <div id="syncBar" class="sync-bar">
+        <div class="sync-status">
+          <span id="syncDot" class="sync-dot" title="Folder sync status"></span>
+          <span id="syncText" class="sync-text">Folder sync off</span>
+        </div>
+        <div class="sync-actions">
+          <button id="connectFolderBtn" class="btn ghost small" title="Save notes as .txt files in a folder you choose (e.g. inside your Google Drive)">Connect folder</button>
+          <button id="disconnectFolderBtn" class="btn ghost small" title="Stop syncing to the folder" hidden>Disconnect</button>
+        </div>
+        <label id="readToggleRow" class="switch sync-read" title="Also detect and pull in edits made to the files outside this app" hidden>
+          <input type="checkbox" id="readToggle" />
+          <span class="switch-track"><span class="switch-thumb"></span></span>
+          <span class="switch-label">Read external edits</span>
+        </label>
+      </div>
     </aside>
 
     <div id="sidebarBackdrop" class="sidebar-backdrop" hidden></div>

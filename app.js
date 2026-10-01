@@ -43,6 +43,13 @@ const els = {
   noteTitle: document.getElementById("noteTitle"),
   searchInput: document.getElementById("searchInput"),
   liveToggle: document.getElementById("liveToggle"),
+  syncBar: document.getElementById("syncBar"),
+  syncDot: document.getElementById("syncDot"),
+  syncText: document.getElementById("syncText"),
+  connectFolderBtn: document.getElementById("connectFolderBtn"),
+  disconnectFolderBtn: document.getElementById("disconnectFolderBtn"),
+  readToggleRow: document.getElementById("readToggleRow"),
+  readToggle: document.getElementById("readToggle"),
 };
 
 // ---- App state ----
@@ -202,6 +209,8 @@ function scheduleSave() {
     els.saveState.textContent = "Saved";
     els.saveState.className = "save-state saved";
     renderNotesList();
+    // Mirror to the connected folder (no-op if none).
+    syncNote(activeId);
   }, 400);
 }
 
@@ -281,6 +290,37 @@ function renderNotesList() {
     time.textContent = formatTime(note.updatedAt);
 
     main.append(title, preview, time);
+
+    // Conflict badge + resolution actions when a note changed in the folder.
+    if (conflicts[note.id]) {
+      li.classList.add("conflicted");
+
+      const badge = document.createElement("div");
+      badge.className = "note-conflict";
+      badge.textContent = "⚠ Changed in folder";
+
+      const actions = document.createElement("div");
+      actions.className = "conflict-actions";
+
+      const keep = document.createElement("button");
+      keep.textContent = "Keep mine";
+      keep.title = "Overwrite the folder file with the app's version (backs up the folder copy)";
+      keep.addEventListener("click", (e) => {
+        e.stopPropagation();
+        resolveKeepMine(note.id);
+      });
+
+      const load = document.createElement("button");
+      load.textContent = "Load from folder";
+      load.title = "Replace the app's version with the folder file";
+      load.addEventListener("click", (e) => {
+        e.stopPropagation();
+        resolveLoadFromDrive(note.id);
+      });
+
+      actions.append(keep, load);
+      main.append(badge, actions);
+    }
 
     const del = document.createElement("button");
     del.className = "note-delete";
@@ -364,7 +404,10 @@ function onDeleteNote(id) {
   if (!confirm(`Delete ${label}? This can't be undone.`)) return;
 
   const wasActive = id === activeId;
+  const entrySnapshot = entry ? { ...entry } : null;
   deleteNote(id);
+  delete conflicts[id];
+  if (entrySnapshot) deleteNoteFile(entrySnapshot);
 
   if (wasActive) {
     if (notesIndex.length === 0) {
@@ -674,7 +717,320 @@ function exportTxt() {
   URL.revokeObjectURL(url);
 }
 
+// ===========================================================================
+// Folder sync (File System Access API) — optional, one-way by default.
+//
+// Design:
+//  - localStorage remains the source of truth. The chosen folder is a MIRROR.
+//  - App -> file: each note is written to "<slug>__<id>.txt" in the folder.
+//  - Before overwriting a file, we check whether it changed externally since we
+//    last wrote it (compare lastModified + size, stored per note in the index).
+//    If it did, we DO NOT overwrite — we mark the note "Changed in Drive" and let
+//    the user resolve it (Keep mine / Load from Drive).
+//  - "Keep mine" first copies the current file to "<name>.bak-<timestamp>.txt" so
+//    the external version is never lost, then writes our version.
+//  - "Read external edits" (opt-in) also scans files on connect/periodically and
+//    surfaces the same conflict badge so external edits can be pulled in on demand.
+// ===========================================================================
+const FS_DB = "voice-notes-fs";
+const FS_STORE = "handles";
+const FS_HANDLE_KEY = "dirHandle";
+const READ_KEY = "voice-notes:readExternal";
 
+const fsSupported = typeof window !== "undefined" && "showDirectoryPicker" in window;
+let dirHandle = null;                 // FileSystemDirectoryHandle for the synced folder
+let readExternal = localStorage.getItem(READ_KEY) === "1";
+let conflicts = {};                   // id -> true when a note is in conflict
+let scanTimer = null;
+
+// --- tiny IndexedDB wrapper just for persisting the directory handle ---
+function idbOpen() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(FS_DB, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(FS_STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function idbSet(key, val) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(FS_STORE, "readwrite");
+    tx.objectStore(FS_STORE).put(val, key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+async function idbGet(key) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(FS_STORE, "readonly");
+    const r = tx.objectStore(FS_STORE).get(key);
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
+}
+async function idbDel(key) {
+  const db = await idbOpen();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(FS_STORE, "readwrite");
+    tx.objectStore(FS_STORE).delete(key);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
+// --- status UI ---
+function setSync(kind, text) {
+  els.syncDot.className = "sync-dot" + (kind ? " " + kind : "");
+  els.syncText.textContent = text;
+}
+
+function reflectSyncUI() {
+  const connected = !!dirHandle;
+  els.connectFolderBtn.hidden = connected;
+  els.disconnectFolderBtn.hidden = !connected;
+  els.readToggleRow.hidden = !connected;
+  els.readToggle.checked = readExternal;
+  if (!fsSupported) {
+    setSync("", "Folder sync not supported in this browser");
+    els.connectFolderBtn.disabled = true;
+  } else if (!connected) {
+    setSync("", "Folder sync off");
+  } else {
+    setSync("connected", "Synced to folder");
+  }
+}
+
+// --- filename for a note: readable slug + stable id suffix ---
+function noteFileName(entry) {
+  const base = slugify(entry.title) || "note";
+  return `${base}__${entry.id}.txt`;
+}
+
+// --- permission handling ---
+async function ensurePermission(handle, mode = "readwrite") {
+  if (!handle) return false;
+  const opts = { mode };
+  if ((await handle.queryPermission(opts)) === "granted") return true;
+  if ((await handle.requestPermission(opts)) === "granted") return true;
+  return false;
+}
+
+// --- connect / disconnect ---
+async function connectFolder() {
+  if (!fsSupported) return;
+  try {
+    const handle = await window.showDirectoryPicker({ mode: "readwrite" });
+    dirHandle = handle;
+    await idbSet(FS_HANDLE_KEY, handle);
+    reflectSyncUI();
+    setSync("syncing", "Writing notes to folder…");
+    await syncAllNotes();
+    setSync("connected", "Synced to folder");
+    setStatus("Folder connected. Notes will be saved there as .txt files.");
+  } catch (err) {
+    if (err && err.name === "AbortError") return; // user cancelled picker
+    setSync("error", "Connect failed");
+    setStatus(`Could not connect folder: ${err.message}`, "error");
+  }
+}
+
+async function disconnectFolder() {
+  dirHandle = null;
+  conflicts = {};
+  await idbDel(FS_HANDLE_KEY);
+  clearInterval(scanTimer);
+  scanTimer = null;
+  reflectSyncUI();
+  renderNotesList();
+  setStatus("Folder disconnected. Notes stay saved in the app.");
+}
+
+// On startup, try to restore a previously-connected folder handle.
+async function restoreFolder() {
+  if (!fsSupported) {
+    reflectSyncUI();
+    return;
+  }
+  try {
+    const handle = await idbGet(FS_HANDLE_KEY);
+    if (handle) {
+      // We have a handle but must re-verify permission (often needs a click).
+      if (await ensurePermission(handle, "readwrite")) {
+        dirHandle = handle;
+        reflectSyncUI();
+        startScanLoop();
+        return;
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  reflectSyncUI();
+}
+
+// --- read a note's file, returning { text, lastModified, size } or null ---
+async function readNoteFile(entry) {
+  if (!dirHandle) return null;
+  try {
+    const fh = await dirHandle.getFileHandle(noteFileName(entry));
+    const file = await fh.getFile();
+    const text = await file.text();
+    return { text, lastModified: file.lastModified, size: file.size };
+  } catch (err) {
+    if (err && err.name === "NotFoundError") return null;
+    throw err;
+  }
+}
+
+// Has the file changed externally since we last wrote it?
+async function isExternallyChanged(entry) {
+  if (!entry.sync) return false; // we've never written it, nothing to clobber
+  const info = await readNoteFile(entry);
+  if (!info) return false; // file missing; treat as not-a-conflict (we'll recreate)
+  return info.lastModified !== entry.sync.lastModified || info.size !== entry.sync.size;
+}
+
+// Write one note's body to its file, recording the resulting file stamp.
+async function writeNoteFile(entry, body) {
+  const fh = await dirHandle.getFileHandle(noteFileName(entry), { create: true });
+  const w = await fh.createWritable();
+  await w.write(body);
+  await w.close();
+  const file = await fh.getFile();
+  entry.sync = { lastModified: file.lastModified, size: file.size };
+  saveIndex();
+}
+
+// Sync a single note (called from scheduleSave). Guards against clobbering.
+async function syncNote(id) {
+  if (!dirHandle) return;
+  const entry = indexEntry(id);
+  if (!entry) return;
+  try {
+    if (await isExternallyChanged(entry)) {
+      conflicts[id] = true;
+      setSync("error", "A note changed in the folder");
+      renderNotesList();
+      return;
+    }
+    setSync("syncing", "Saving to folder…");
+    await writeNoteFile(entry, getNoteBody(id));
+    setSync("connected", "Synced to folder");
+  } catch (err) {
+    setSync("error", "Sync error");
+    setStatus(`Folder sync error: ${err.message}`, "error");
+  }
+}
+
+// Write every note out (used on first connect).
+async function syncAllNotes() {
+  if (!dirHandle) return;
+  for (const entry of notesIndex) {
+    try {
+      // Don't clobber external changes during a bulk sync either.
+      if (await isExternallyChanged(entry)) {
+        conflicts[entry.id] = true;
+        continue;
+      }
+      await writeNoteFile(entry, getNoteBody(entry.id));
+    } catch {
+      /* skip this file, continue */
+    }
+  }
+  renderNotesList();
+}
+
+// Remove a note's file when the note is deleted in-app.
+async function deleteNoteFile(entry) {
+  if (!dirHandle || !entry) return;
+  try {
+    await dirHandle.removeEntry(noteFileName(entry));
+  } catch {
+    /* file may not exist; ignore */
+  }
+}
+
+// --- conflict resolution ---
+async function resolveKeepMine(id) {
+  const entry = indexEntry(id);
+  if (!entry || !dirHandle) return;
+  try {
+    // Back up the external version first so it's never lost.
+    const info = await readNoteFile(entry);
+    if (info) {
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+      const bakName = noteFileName(entry).replace(/\.txt$/, `.bak-${stamp}.txt`);
+      const bh = await dirHandle.getFileHandle(bakName, { create: true });
+      const bw = await bh.createWritable();
+      await bw.write(info.text);
+      await bw.close();
+    }
+    await writeNoteFile(entry, getNoteBody(id));
+    delete conflicts[id];
+    setSync("connected", "Synced to folder");
+    setStatus("Kept your version. The folder copy was backed up as a .bak file.");
+    renderNotesList();
+  } catch (err) {
+    setStatus(`Could not resolve: ${err.message}`, "error");
+  }
+}
+
+async function resolveLoadFromDrive(id) {
+  const entry = indexEntry(id);
+  if (!entry || !dirHandle) return;
+  try {
+    const info = await readNoteFile(entry);
+    if (!info) {
+      delete conflicts[id];
+      renderNotesList();
+      return;
+    }
+    setNoteBody(id, info.text);
+    entry.title = els.noteTitle.value.trim() || deriveTitle(info.text) || entry.title;
+    entry.sync = { lastModified: info.lastModified, size: info.size };
+    saveIndex();
+    delete conflicts[id];
+    if (id === activeId) {
+      els.editor.innerText = info.text;
+      updateWordCount();
+    }
+    setSync("connected", "Synced to folder");
+    setStatus("Loaded the folder version into the app.");
+    renderNotesList();
+  } catch (err) {
+    setStatus(`Could not load from folder: ${err.message}`, "error");
+  }
+}
+
+// --- optional read-direction scan: flag notes whose files changed externally ---
+async function scanForExternalChanges() {
+  if (!dirHandle || !readExternal) return;
+  let found = false;
+  for (const entry of notesIndex) {
+    try {
+      if (await isExternallyChanged(entry)) {
+        conflicts[entry.id] = true;
+        found = true;
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  if (found) {
+    setSync("error", "A note changed in the folder");
+    renderNotesList();
+  }
+}
+
+function startScanLoop() {
+  clearInterval(scanTimer);
+  if (dirHandle && readExternal) {
+    scanForExternalChanges();
+    scanTimer = setInterval(scanForExternalChanges, 15000);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Wiring
@@ -708,6 +1064,22 @@ els.searchInput.addEventListener("input", () => {
   renderNotesList();
 });
 
+// Folder sync controls.
+els.connectFolderBtn.addEventListener("click", connectFolder);
+els.disconnectFolderBtn.addEventListener("click", disconnectFolder);
+els.readToggle.addEventListener("change", () => {
+  readExternal = els.readToggle.checked;
+  localStorage.setItem(READ_KEY, readExternal ? "1" : "0");
+  if (readExternal) {
+    setStatus("Will watch for edits made to the files outside the app.");
+    startScanLoop();
+  } else {
+    clearInterval(scanTimer);
+    scanTimer = null;
+    setStatus("No longer watching for external edits.");
+  }
+});
+
 // Live transcription toggle.
 els.liveToggle.addEventListener("change", () => {
   liveMode = els.liveToggle.checked;
@@ -736,6 +1108,10 @@ if ([...els.modelSelect.options].some((o) => o.value === currentModel)) {
 
 // Restore live-mode toggle state.
 els.liveToggle.checked = liveMode;
+
+// Set up folder sync UI and try to restore a previously-connected folder.
+reflectSyncUI();
+restoreFolder();
 
 // --- Startup: load notes, migrate legacy, open an active note ---
 loadIndex();

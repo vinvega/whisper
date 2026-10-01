@@ -9,6 +9,8 @@ so after the first load there is no internet, no server, and no cost.
 - Edit and type by hand too
 - Keep multiple notes, selectable from a sidebar (create, rename, delete)
 - Search/filter notes and drag to reorder them
+- Optional folder sync: mirror notes to `.txt` files (e.g. in Google Drive), with
+  protection against overwriting edits made outside the app
 - Auto-saves to the browser; export the current note any time as `.txt`
 - Installs to the Chromebook shelf and runs offline
 
@@ -89,8 +91,9 @@ How Live works and its limits:
 
 - Models are English-only (`.en`). To support other languages, switch the model
   IDs in `app.js` to the multilingual variants (e.g. `Xenova/whisper-base`).
-- Everything stays on the device. Notes are saved in the browser's local storage
-  for this site; clearing site data will remove them, so export anything important.
+- By default notes are saved in the browser's local storage for this site;
+  clearing site data will remove them, so export (or use folder sync) for anything
+  important. You can also sync notes to a real folder — see **Folder sync** below.
 
 ## Working with multiple notes
 
@@ -107,3 +110,77 @@ How Live works and its limits:
 - **Reorder:** grab the handle (⠿) on the left of a note and drag it up or down.
   The order you set is saved. Editing a note no longer changes its position, so
   your manual order sticks. (Reordering is disabled while a search is active.)
+
+## Folder sync (save notes as files, e.g. to Google Drive)
+
+The app can mirror your notes to plain `.txt` files in a folder you choose. On a
+Chromebook, point it at a folder inside your **Google Drive** mount (via the Files
+app) and ChromeOS/Drive handles syncing those files across your devices — no
+accounts, API keys, or servers needed here.
+
+This uses the browser's **File System Access API** (Chrome/Chromium, including
+ChromeOS; needs `http://localhost` or HTTPS).
+
+### How it works
+
+- Click **Connect folder** at the bottom of the sidebar and pick a folder. The app
+  writes each note to `<title>__<id>.txt` and keeps it updated as you edit.
+- The browser's local storage stays the **source of truth**; the folder is a
+  mirror. The app keeps working if the folder isn't connected.
+- The chosen folder is remembered between sessions, though the browser may ask you
+  to re-grant access with one click.
+- **Disconnect** stops syncing; your notes stay in the app.
+
+### Protection against overwriting external edits
+
+The main risk with syncing is the app silently clobbering a change you made to a
+file elsewhere (e.g. edited in Drive on your phone). The app guards against this:
+
+- Before overwriting a file, it checks whether the file changed outside the app
+  (by comparing the file's modified time and size against what it last wrote).
+- If it changed, the app **does not overwrite**. It marks that note
+  **"⚠ Changed in folder"** in the sidebar and lets you choose:
+  - **Keep mine** — writes the app's version, but first copies the folder's
+    current content to a `*.bak-<timestamp>.txt` file so the external version is
+    never lost.
+  - **Load from folder** — pulls the folder file's content into the app.
+- **Read external edits** (opt-in toggle): when on, the app also periodically scans
+  the folder and raises the same badge if a file changed, so you can pull in edits
+  made elsewhere on your terms.
+
+Nothing is overwritten in either direction without you choosing it, and resolved
+conflicts always leave a recoverable `.bak` copy.
+
+### Limitations
+
+- Conflict handling detects *that* a file changed, not *what* changed, and does not
+  auto-merge. If you edited both the app and the file, you pick one (both are kept
+  — the other side is preserved as a `.bak`).
+- One note maps to one file; renaming a note writes a new file (the old one is left
+  behind until you clean it up).
+
+## Ideas for future improvement
+
+Rough notes for where this could go next, roughly easiest to hardest:
+
+- **Keyboard shortcuts:** focus search, start/stop recording, new note.
+- **Import `.txt` files** from the connected folder as new notes (bulk read-in).
+- **Clean up renamed files:** when a note's title changes, remove the old
+  `<old-title>__<id>.txt` instead of leaving it behind.
+- **IndexedDB as the primary store** (instead of localStorage) to lift the ~5MB
+  cap and store audio/attachments.
+- **Richer conflict view:** show a side-by-side diff of the app vs. folder version
+  before choosing Keep mine / Load from folder.
+- **Silence-based live chunking:** split live transcription on natural pauses
+  instead of a fixed interval, for cleaner phrase boundaries.
+- **Two-way sync with real merge:** currently conflicts are last-writer-wins with a
+  `.bak` safety net. A proper merge (or version history) would be the big step.
+  Options considered and deferred: an in-browser `git` (isomorphic-git) — rejected
+  because a live `.git` folder synced through Drive risks repo corruption and adds
+  heavy complexity; or a small backend owning a real git repo + remote — rejected
+  for now because it reintroduces a server, auth, and network, breaking the
+  offline-first, zero-setup goal. Revisit only if versioned multi-device merge
+  becomes a primary requirement.
+- **Full Google Drive API integration:** reach notes on devices where Drive isn't
+  mounted locally, using the Drive app-data folder. Needs OAuth + a Google Cloud
+  project, so it trades away the current zero-setup simplicity.
