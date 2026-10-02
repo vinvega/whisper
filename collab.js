@@ -251,7 +251,11 @@ function initCollab() {
     if (els.collabSidebar) els.collabSidebar.hidden = !on;
     if (els.modeToggle) {
       els.modeToggle.setAttribute("aria-pressed", on ? "true" : "false");
-      els.modeToggle.textContent = on ? "Notes" : "Collaboration";
+      // Label the ACTION (where the button takes you), not the current view.
+      els.modeToggle.textContent = on ? "Switch to Notes" : "Switch to Collaboration";
+      els.modeToggle.title = on
+        ? "Currently in Collaboration — switch back to private Notes"
+        : "Currently in Notes — switch to Collaboration";
     }
 
     if (on) {
