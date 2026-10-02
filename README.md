@@ -256,11 +256,17 @@ are untouched and remain the default.
 - **Voice + pictures:** dictate posts with the same local Whisper transcription.
   **Insert picture** adds a new image (stored in `media/`) or reuses an existing one
   from the story, dropping the markdown at your cursor.
+- **Editing aids:** each post shows an **Unsaved changes / Saved** indicator and an
+  **Auto-save** toggle (debounced save as you type). Posts show their author and
+  timestamp, and you can **drag to reorder your own posts** (reordering writes a new
+  order to your file; everyone re-sorts deterministically).
 - **Build combined story:** the **Build combined story** button writes `story.md`
   into the folder from what you currently have synced, so anyone can read the whole
   assembled document (even outside the app, straight from Drive). It also rebuilds
   automatically after ~30s of inactivity, and you can download the assembled `.md`
-  locally.
+  locally. The in-app assembled preview is **rendered markdown** (headings, bold,
+  lists, links, and inline images), produced by a small built-in sanitizing renderer
+  — co-author content is HTML-escaped first, so it can't inject markup.
 
 ### Trust model & limitations
 

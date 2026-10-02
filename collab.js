@@ -18,8 +18,10 @@ import {
   penSlug,
   newPostId,
   nextOrder,
+  sortPosts,
 } from "./collab-core.js";
 import { createCollabStore } from "./collab-store.js";
+import { renderMarkdown } from "./md-render.js";
 
 // ---------------------------------------------------------------------------
 // Element lookup + guard. If the core collab DOM is missing, bail quietly.
@@ -48,6 +50,8 @@ const els = {
   insertPictureBtn: $("insertPictureBtn"),
   savePostBtn: $("savePostBtn"),
   deletePostBtn: $("deletePostBtn"),
+  postSaveState: $("postSaveState"),
+  autoSaveToggle: $("autoSaveToggle"),
   assembledView: $("assembledView"),
   buildStoryBtn: $("buildStoryBtn"),
   downloadStoryBtn: $("downloadStoryBtn"),
@@ -75,6 +79,9 @@ function initCollab() {
   const BG_CHECK_MS = 20000;   // background "updates available" probe
   const IDLE_BUILD_MS = 30000; // idle auto-build timer
 
+  const AUTOSAVE_KEY = "voice-notes:collabAutoSave";
+  const AUTOSAVE_MS = 1200;    // debounce for auto-save while typing
+
   const fsSupported =
     typeof window !== "undefined" && "showDirectoryPicker" in window;
 
@@ -84,11 +91,58 @@ function initCollab() {
   let collabActive = false;      // is the collab view currently shown
   let editingId = null;          // id of post open in the editor (null = none)
   let editingNew = false;        // editor holds an unsaved brand-new post
+  let dirty = false;             // editor has unsaved changes
+  let autoSave = localStorage.getItem(AUTOSAVE_KEY) === "1";
+  let autoSaveTimer = null;
   let bgTimer = null;
   let idleTimer = null;
   let savedRange = null;         // last caret Range inside #postEditor
   let mediaObjectUrls = [];      // object URLs to revoke when the modal closes
+  let assembledUrls = [];        // object URLs for images in the assembled preview
   let pendingUpload = null;      // { name } freshly uploaded, pre-selected
+  let dragId = null;             // id of the own-post being dragged to reorder
+
+  // Format an ISO timestamp for display (same-day -> time, else short date).
+  function formatWhen(iso) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d)) return "";
+    const now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    return sameDay
+      ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }) +
+        " " + d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+
+  // Unsaved-state indicator.
+  function setSaveState(state) {
+    if (!els.postSaveState) return;
+    if (state === "saved") {
+      els.postSaveState.textContent = "Saved";
+      els.postSaveState.className = "post-save-state saved";
+    } else if (state === "saving") {
+      els.postSaveState.textContent = "Saving…";
+      els.postSaveState.className = "post-save-state saving";
+    } else if (state === "unsaved") {
+      els.postSaveState.textContent = "Unsaved changes";
+      els.postSaveState.className = "post-save-state unsaved";
+    } else {
+      els.postSaveState.textContent = "";
+      els.postSaveState.className = "post-save-state";
+    }
+  }
+
+  function markDirty() {
+    dirty = true;
+    setSaveState("unsaved");
+    if (autoSave) {
+      clearTimeout(autoSaveTimer);
+      autoSaveTimer = setTimeout(() => {
+        if (dirty && editingId !== null) savePost();
+      }, AUTOSAVE_MS);
+    }
+  }
 
   // -------------------------------------------------------------------------
   // Tiny IndexedDB helpers (same DB/store as app.js, independent key).
@@ -372,15 +426,7 @@ function initCollab() {
     els.postList.innerHTML = "";
     if (!store) return;
 
-    // sortPosts lives in collab-core; the store exposes posts as a Map. We sort
-    // here via the store's assembledText ordering indirectly — but to render we
-    // need the sorted array, so import-free: sort by order/created/id like core.
-    const posts = [...store.posts.values()].sort((a, b) => {
-      if (a.order !== b.order) return a.order - b.order;
-      if (a.created !== b.created) return a.created < b.created ? -1 : 1;
-      if (a.id !== b.id) return a.id < b.id ? -1 : 1;
-      return 0;
-    });
+    const posts = sortPosts([...store.posts.values()]);
 
     if (posts.length === 0) {
       const empty = document.createElement("li");
@@ -396,6 +442,17 @@ function initCollab() {
       if (post.id === editingId) li.classList.add("active");
       li.dataset.id = post.id;
 
+      // Drag handle (own posts only) — reorder writes a new `order` to the file.
+      if (post.mine) {
+        const handle = document.createElement("div");
+        handle.className = "drag-handle";
+        handle.title = "Drag to reorder your post";
+        handle.textContent = "⠿";
+        handle.draggable = true;
+        attachReorderDrag(handle, li, post.id);
+        li.appendChild(handle);
+      }
+
       const main = document.createElement("div");
       main.className = "note-item-main";
 
@@ -403,23 +460,22 @@ function initCollab() {
       preview.className = "note-item-preview";
       preview.textContent = previewOf(post.body);
 
-      const author = document.createElement("div");
-      author.className = "post-author";
-      if (post.mine) {
-        author.innerHTML = `<span class="post-you">You</span> · ${escapeHtml(
-          post.author
-        )}`;
-      } else {
-        author.textContent = post.author;
-      }
+      const meta = document.createElement("div");
+      meta.className = "post-meta";
+      const author = post.mine
+        ? `<span class="post-you">You</span> · ${escapeHtml(post.author)}`
+        : escapeHtml(post.author);
+      const when = formatWhen(post.updated || post.created);
+      meta.innerHTML = `<span class="post-author">${author}</span>` +
+        (when ? `<span class="post-when">${escapeHtml(when)}</span>` : "");
 
       main.appendChild(preview);
-      main.appendChild(author);
+      main.appendChild(meta);
       li.appendChild(main);
 
       if (post.mine) {
         li.addEventListener("click", (e) => {
-          if (e.target.closest(".note-delete")) return;
+          if (e.target.closest(".note-delete") || e.target.closest(".drag-handle")) return;
           resetIdleTimer();
           openEditor(post.id);
         });
@@ -433,6 +489,7 @@ function initCollab() {
           deletePost(post.id);
         });
         li.appendChild(del);
+        attachReorderDrop(li, post.id);
       }
 
       els.postList.appendChild(li);
@@ -444,6 +501,82 @@ function initCollab() {
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
+  }
+
+  // --- Drag-to-reorder (own posts only) ------------------------------------
+  function attachReorderDrag(handle, li, id) {
+    handle.addEventListener("dragstart", (e) => {
+      dragId = id;
+      li.classList.add("dragging");
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", id);
+      }
+    });
+    handle.addEventListener("dragend", () => {
+      li.classList.remove("dragging");
+      dragId = null;
+      [...els.postList.children].forEach(
+        (c) => c.classList && c.classList.remove("drag-over")
+      );
+    });
+  }
+
+  function attachReorderDrop(li, targetId) {
+    li.addEventListener("dragover", (e) => {
+      if (dragId === null || dragId === targetId) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+      li.classList.add("drag-over");
+    });
+    li.addEventListener("dragleave", () => li.classList.remove("drag-over"));
+    li.addEventListener("drop", (e) => {
+      e.preventDefault();
+      li.classList.remove("drag-over");
+      if (dragId !== null && dragId !== targetId) reorderOwnPost(dragId, targetId);
+    });
+  }
+
+  // Reorder: place the dragged post just before the target in the current sorted
+  // view, assign it an `order` midway between the target's neighbours, and persist
+  // ONLY the dragged (own) post's file. Deterministic sort does the rest for all.
+  async function reorderOwnPost(fromId, toId) {
+    if (!store) return;
+    const dragged = store.posts.get(fromId);
+    if (!dragged || !dragged.mine) {
+      setStatus("You can only reorder your own posts.", "error");
+      return;
+    }
+    const sorted = sortPosts([...store.posts.values()]);
+    const toIdx = sorted.findIndex((p) => p.id === toId);
+    if (toIdx === -1) return;
+
+    const prev = sorted[toIdx - 1];
+    const target = sorted[toIdx];
+    // New order = midpoint between the target's predecessor and the target.
+    let newOrder;
+    if (!prev) newOrder = target.order - 1000;
+    else newOrder = Math.floor((prev.order + target.order) / 2);
+    // Guard against collision when neighbours are adjacent integers.
+    if (newOrder === target.order || (prev && newOrder === prev.order)) {
+      newOrder = target.order - 1; // best-effort; tiebreak handles equal values
+    }
+
+    const now = new Date().toISOString();
+    const post = { ...dragged, order: newOrder, updated: now, author: penName || dragged.author };
+    try {
+      const res = await store.writeOwnPost(post);
+      if (res && res.ok) {
+        renderPostList();
+        renderAssembled();
+        scheduleIdleBuild();
+      } else if (res && res.conflict) {
+        showConflict(post, res.fileName);
+      }
+    } catch (err) {
+      setStatus("Reorder failed: " + (err && err.message), "error");
+    }
+    resetIdleTimer();
   }
 
   // =========================================================================
@@ -476,6 +609,8 @@ function initCollab() {
     store.posts.set(post.id, post);
     els.postEditor.innerText = "";
     if (els.deletePostBtn) els.deletePostBtn.hidden = false;
+    dirty = false;
+    setSaveState("unsaved"); // a new empty post isn't on disk yet
     renderPostList();
     els.postEditor.focus();
     setStatus("New post. Write, then Save.");
@@ -491,6 +626,8 @@ function initCollab() {
     store.setEditing(id);
     els.postEditor.innerText = post.body || "";
     if (els.deletePostBtn) els.deletePostBtn.hidden = false;
+    dirty = false;
+    setSaveState("saved");
     renderPostList();
     els.postEditor.focus();
     setStatus("Editing your post.");
@@ -499,6 +636,9 @@ function initCollab() {
   function closeEditor() {
     editingId = null;
     editingNew = false;
+    dirty = false;
+    clearTimeout(autoSaveTimer);
+    setSaveState("");
     if (store) store.setEditing(null);
     if (els.postEditor) els.postEditor.innerText = "";
     if (els.deletePostBtn) els.deletePostBtn.hidden = true;
@@ -521,18 +661,23 @@ function initCollab() {
       updated: now,
       body: els.postEditor.innerText,
     };
+    setSaveState("saving");
     try {
       const res = await store.writeOwnPost(post);
       if (res && res.ok) {
         editingNew = false;
+        dirty = false;
+        setSaveState("saved");
         setStatus("Saved.", "ok");
         renderPostList();
         renderAssembled();
         scheduleIdleBuild();
       } else if (res && res.conflict) {
+        setSaveState("unsaved");
         showConflict(post, res.fileName);
       }
     } catch (err) {
+      setSaveState("unsaved");
       setStatus("Save failed: " + (err && err.message), "error");
     }
     resetIdleTimer();
@@ -629,9 +774,20 @@ function initCollab() {
     if (store && editingId !== null) {
       const p = store.posts.get(editingId);
       if (p) p.body = els.postEditor.innerText;
+      markDirty();
     }
     resetIdleTimer();
   });
+
+  // Auto-save toggle.
+  if (els.autoSaveToggle) {
+    els.autoSaveToggle.checked = autoSave;
+    els.autoSaveToggle.addEventListener("change", () => {
+      autoSave = els.autoSaveToggle.checked;
+      localStorage.setItem(AUTOSAVE_KEY, autoSave ? "1" : "0");
+      if (autoSave && dirty && editingId !== null) savePost();
+    });
+  }
 
   // =========================================================================
   // (7) Voice capture in the editor (stop-mode via the shared recorder)
@@ -639,6 +795,7 @@ function initCollab() {
   function installSink() {
     window.__transcriptSink = (text) => {
       insertAtCaret(text);
+      if (editingId !== null) markDirty();
       resetIdleTimer();
     };
   }
@@ -894,6 +1051,7 @@ function initCollab() {
     const markdown = `![${alt}](media/${selectedMediaName})`;
     closeMediaModal();
     insertAtCaret(markdown);
+    if (editingId !== null) markDirty();
     setStatus("Picture reference inserted.");
     resetIdleTimer();
   }
@@ -955,9 +1113,54 @@ function initCollab() {
     resetIdleTimer();
   }
 
-  function renderAssembled() {
+  async function renderAssembled() {
     if (!els.assembledView || !store) return;
-    els.assembledView.textContent = store.assembledText();
+    const md = store.assembledText();
+    // Safe render (escapes HTML, then applies markdown). Co-author content can't
+    // inject markup.
+    const html = renderMarkdown(md);
+    els.assembledView.innerHTML = html;
+    await resolveAssembledImages();
+  }
+
+  // Replace media/<file> image srcs with object URLs loaded from the folder, so
+  // pictures actually display in the preview. Old URLs are revoked first.
+  async function resolveAssembledImages() {
+    for (const url of assembledUrls) {
+      try { URL.revokeObjectURL(url); } catch { /* ignore */ }
+    }
+    assembledUrls = [];
+    if (!store) return;
+
+    const imgs = els.assembledView.querySelectorAll('img[src^="media/"]');
+    if (!imgs.length) return;
+
+    // Build a filename -> handle map once from the media listing.
+    let media;
+    try {
+      media = await store.listMedia();
+    } catch {
+      return;
+    }
+    const byName = new Map(media.map((m) => [m.name, m.handle]));
+
+    for (const img of imgs) {
+      const src = img.getAttribute("src") || "";
+      const name = src.replace(/^media\//, "");
+      const handle = byName.get(name);
+      if (!handle) {
+        img.alt = (img.alt || "") + " (missing picture)";
+        continue;
+      }
+      try {
+        const file = await handle.getFile();
+        const url = URL.createObjectURL(file);
+        assembledUrls.push(url);
+        img.src = url;
+      } catch {
+        /* leave broken */
+      }
+    }
   }
 
   if (els.buildStoryBtn) els.buildStoryBtn.addEventListener("click", buildStory);

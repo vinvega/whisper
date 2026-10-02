@@ -148,6 +148,12 @@
         <div class="collab-editor-head">
           <span class="collab-editor-title">Post editor</span>
           <div class="collab-editor-actions">
+            <span id="postSaveState" class="post-save-state" aria-live="polite"></span>
+            <label class="switch collab-autosave" title="Automatically save your post as you type">
+              <input type="checkbox" id="autoSaveToggle" />
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <span class="switch-label">Auto-save</span>
+            </label>
             <button id="postRecordBtn" class="btn ghost small" type="button" title="Dictate into this post">Record</button>
             <button id="insertPictureBtn" class="btn ghost small" type="button" title="Insert a picture">Insert picture</button>
             <button id="savePostBtn" class="btn ghost small" type="button" title="Save this post">Save</button>
