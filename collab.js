@@ -81,6 +81,8 @@ function initCollab() {
 
   const AUTOSAVE_KEY = "voice-notes:collabAutoSave";
   const AUTOSAVE_MS = 1200;    // debounce for auto-save while typing
+  const MODE_KEY = "voice-notes:collabMode";   // "1" when last in Collaboration
+  const LAST_POST_KEY = "voice-notes:collabLastPost"; // id of last-open post
 
   const fsSupported =
     typeof window !== "undefined" && "showDirectoryPicker" in window;
@@ -242,6 +244,7 @@ function initCollab() {
   // =========================================================================
   function showCollab(on) {
     collabActive = on;
+    localStorage.setItem(MODE_KEY, on ? "1" : "0");
     document.body.classList.toggle("collab-mode", on);
     // Private notes surfaces
     if (els.appMain) els.appMain.hidden = on;
@@ -360,6 +363,8 @@ function initCollab() {
   // =========================================================================
   // (4) Refresh model + background "updates available" check
   // =========================================================================
+  let reopenedLastPost = false;
+
   async function refreshNow() {
     if (!store) return;
     try {
@@ -367,6 +372,17 @@ function initCollab() {
       hideUpdates();
       renderPostList();
       renderAssembled();
+      // After the first successful load this session, reopen the post the user
+      // was last editing (if it still exists and is theirs).
+      if (!reopenedLastPost) {
+        reopenedLastPost = true;
+        const lastId = localStorage.getItem(LAST_POST_KEY);
+        if (lastId) {
+          const p = store.posts.get(lastId);
+          if (p && p.mine) openEditor(lastId);
+          else localStorage.removeItem(LAST_POST_KEY); // stale/gone/not ours
+        }
+      }
     } catch (err) {
       setStatus("Refresh failed: " + (err && err.message), "error");
     }
@@ -628,6 +644,7 @@ function initCollab() {
     editingId = id;
     editingNew = false;
     store.setEditing(id);
+    localStorage.setItem(LAST_POST_KEY, id);
     els.postEditor.innerText = post.body || "";
     if (els.deletePostBtn) els.deletePostBtn.hidden = false;
     dirty = false;
@@ -642,6 +659,7 @@ function initCollab() {
     editingNew = false;
     dirty = false;
     clearTimeout(autoSaveTimer);
+    localStorage.removeItem(LAST_POST_KEY);
     setSaveState("");
     if (store) store.setEditing(null);
     if (els.postEditor) els.postEditor.innerText = "";
@@ -671,6 +689,7 @@ function initCollab() {
       if (res && res.ok) {
         editingNew = false;
         dirty = false;
+        localStorage.setItem(LAST_POST_KEY, editingId);
         setSaveState("saved");
         setStatus("Saved.", "ok");
         renderPostList();
@@ -1204,6 +1223,13 @@ function initCollab() {
   // =========================================================================
   loadPenName();
   reflectConnectUI();
-  // Attempt silent restore of a previously connected folder.
+  // Attempt silent restore of a previously connected folder (then the first
+  // refresh reopens the last-edited post, if any).
   restoreFolder().catch(() => {});
+
+  // Restore the last-used mode. If the user was last in Collaboration, show it.
+  // (restoreFolder runs in parallel; the post reopens once its refresh lands.)
+  if (localStorage.getItem(MODE_KEY) === "1") {
+    showCollab(true);
+  }
 }
