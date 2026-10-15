@@ -84,6 +84,11 @@ Notes:
 - After deploying an update, bump the cache version in `sw.js` (e.g.
   `voice-notes-shell-v2` → `v3`) so returning visitors get the new files instead of
   the service worker's cached copy.
+- **Auto-update:** the app detects a newly deployed service worker and reloads
+  itself once to apply it (deferred if you're mid-recording or have unsaved collab
+  edits). So after a deploy, an open app picks up the change on its own within about
+  a minute — no manual cache-clearing or hard-refresh needed. (A brand-new first
+  visit never auto-reloads.)
 - First load needs internet to fetch the Whisper model + Transformers.js from the
   CDN; afterward it's cached for offline use.
 

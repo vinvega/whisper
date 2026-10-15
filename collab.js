@@ -1296,6 +1296,10 @@ function initCollab() {
     }
   }
 
+  // Let the auto-update logic in app.js defer a reload while the user is mid-task
+  // in collaboration mode (recording a post or with unsaved edits).
+  window.__collabBusy = () => capturing || (dirty && editingId !== null);
+
   // =========================================================================
   // Bootstrap
   // =========================================================================

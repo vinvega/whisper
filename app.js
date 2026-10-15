@@ -1497,9 +1497,54 @@ window.__voiceCapture = {
   },
 };
 
-// Register the service worker for offline support.
+// Register the service worker for offline support, with automatic updates.
+//
+// The service worker calls skipWaiting() on install, so a freshly deployed worker
+// activates as soon as it's fetched. When it takes control, `controllerchange`
+// fires and we reload the page ONCE to pick up the new assets — so users never
+// have to clear caches or hard-refresh to get updates. We defer the reload while
+// the user is mid-task (recording, or unsaved collab edits) so work isn't lost.
 if ("serviceWorker" in navigator) {
+  let reloadingForUpdate = false;
+  // Was the page already controlled by a worker when it loaded? If not, this is a
+  // first-ever install (controller goes null -> active) and we must NOT reload —
+  // only reload on genuine UPDATES (an existing controller being replaced).
+  const hadControllerAtLoad = !!navigator.serviceWorker.controller;
+
+  // Is it safe to reload right now, or is the user in the middle of something?
+  function safeToReload() {
+    if (recording || startingRecording || stopping) return false;
+    // Collaboration can flag "busy" (unsaved edits / recording in a post).
+    if (typeof window.__collabBusy === "function" && window.__collabBusy()) return false;
+    return true;
+  }
+
+  function reloadWhenSafe() {
+    if (reloadingForUpdate) return;
+    if (safeToReload()) {
+      reloadingForUpdate = true;
+      window.location.reload();
+    } else {
+      // Try again shortly; the user will finish their task soon.
+      setTimeout(reloadWhenSafe, 3000);
+    }
+  }
+
+  // Fires when a new service worker takes control of the page. Only treat it as an
+  // update (reload) if the page was already controlled — skip the first install.
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (hadControllerAtLoad) reloadWhenSafe();
+  });
+
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register("sw.js").catch(() => {});
+    navigator.serviceWorker
+      .register("sw.js")
+      .then((reg) => {
+        // Proactively check for a new deploy now and periodically, so updates are
+        // noticed without waiting for a full navigation.
+        reg.update().catch(() => {});
+        setInterval(() => reg.update().catch(() => {}), 60 * 60 * 1000); // hourly
+      })
+      .catch(() => {});
   });
 }
