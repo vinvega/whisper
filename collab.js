@@ -34,6 +34,9 @@ const els = {
   appMain: document.querySelector(".app-main"),
   notesSidebar: $("sidebar"),
   liveToggle: $("liveToggle"),
+  // shared chrome also used by collab on mobile
+  sidebarToggle: $("sidebarToggle"),
+  sidebarBackdrop: $("sidebarBackdrop"),
   // collab surfaces
   collabMain: $("collabMain"),
   collabSidebar: $("collabSidebar"),
@@ -265,15 +268,66 @@ function initCollab() {
     if (on) {
       startBackgroundCheck();
       resetIdleTimer();
+      // On phones the posts sidebar overlays everything; start collapsed so the
+      // editor is visible, and let the hamburger reveal it.
+      if (isNarrow()) collapseCollabSidebar(true);
+      else collapseCollabSidebar(false);
     } else {
-      // Leaving collab: release the sink and stop background work.
+      // Leaving collab: release the sink, stop background work, hide any backdrop.
       releaseSink();
       stopBackgroundCheck();
       clearIdleTimer();
+      if (els.sidebarBackdrop) els.sidebarBackdrop.hidden = true;
     }
   }
 
   els.modeToggle.addEventListener("click", () => showCollab(!collabActive));
+
+  // --- Collab sidebar collapse/expand (phones) -----------------------------
+  function isNarrow() {
+    return typeof window.matchMedia === "function" &&
+      window.matchMedia("(max-width: 720px)").matches;
+  }
+
+  function collapseCollabSidebar(collapsed) {
+    if (!els.collabSidebar) return;
+    els.collabSidebar.classList.toggle("collapsed", collapsed);
+    // Show the dimming backdrop only when the sidebar is open in overlay mode.
+    if (els.sidebarBackdrop) {
+      els.sidebarBackdrop.hidden = collapsed || !isNarrow();
+    }
+  }
+
+  function toggleCollabSidebar() {
+    if (!els.collabSidebar) return;
+    collapseCollabSidebar(!els.collabSidebar.classList.contains("collapsed"));
+  }
+
+  // In collab mode, the shared hamburger controls the COLLAB sidebar. We listen
+  // in capture phase and stop propagation so app.js's handler (which toggles the
+  // private sidebar) doesn't also run.
+  if (els.sidebarToggle) {
+    els.sidebarToggle.addEventListener(
+      "click",
+      (e) => {
+        if (!collabActive) return; // not our mode; let app.js handle it
+        e.stopImmediatePropagation();
+        toggleCollabSidebar();
+      },
+      true // capture
+    );
+  }
+  if (els.sidebarBackdrop) {
+    els.sidebarBackdrop.addEventListener(
+      "click",
+      (e) => {
+        if (!collabActive) return;
+        e.stopImmediatePropagation();
+        collapseCollabSidebar(true);
+      },
+      true
+    );
+  }
 
   // =========================================================================
   // (3) Connect / disconnect story folder
@@ -633,6 +687,7 @@ function initCollab() {
     dirty = false;
     setSaveState("unsaved"); // a new empty post isn't on disk yet
     renderPostList();
+    if (isNarrow()) collapseCollabSidebar(true); // reveal the editor on phones
     els.postEditor.focus();
     setStatus("New post. Write, then Save.");
     resetIdleTimer();
@@ -651,6 +706,7 @@ function initCollab() {
     dirty = false;
     setSaveState("saved");
     renderPostList();
+    if (isNarrow()) collapseCollabSidebar(true); // reveal the editor on phones
     els.postEditor.focus();
     setStatus("Editing your post.");
   }

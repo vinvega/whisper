@@ -4,8 +4,8 @@
 //  - Transformers.js library + Whisper model files (CDN/HF hub): stale-while-revalidate
 //    runtime caching, so after the first successful online run they are available offline.
 
-const SHELL_CACHE = "voice-notes-shell-v9";
-const RUNTIME_CACHE = "voice-notes-runtime-v9";
+const SHELL_CACHE = "voice-notes-shell-v10";
+const RUNTIME_CACHE = "voice-notes-runtime-v10";
 
 const SHELL_ASSETS = [
   "./",
