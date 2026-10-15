@@ -103,6 +103,7 @@ function initCollab() {
   let assembledUrls = [];        // object URLs for images in the assembled preview
   let pendingUpload = null;      // { name } freshly uploaded, pre-selected
   let dragId = null;             // id of the own-post being dragged to reorder
+  let capturing = false;         // collab's own record intent (avoids racing the shared flag)
 
   // Format an ISO timestamp for display (same-day -> time, else short date).
   function formatWhen(iso) {
@@ -824,39 +825,60 @@ function initCollab() {
   }
   function releaseSink() {
     if (window.__transcriptSink) window.__transcriptSink = null;
+    capturing = false;
     if (els.postRecordBtn) {
       els.postRecordBtn.classList.remove("recording");
       els.postRecordBtn.textContent = "Record";
     }
   }
 
-  function toggleRecord() {
+  async function toggleRecord() {
     const vc = window.__voiceCapture;
     if (!vc) {
       setStatus("Voice capture isn't available.", "error");
       return;
     }
-    if (vc.isRecording()) {
+
+    // If we're capturing (or the shared recorder is active), stop.
+    if (capturing || vc.isRecording()) {
+      capturing = false;
+      setRecordBtn(false);
       vc.stop();
-      els.postRecordBtn.classList.remove("recording");
-      els.postRecordBtn.textContent = "Record";
-      // Sink stays installed until the final transcript arrives; it's cleared
-      // when leaving the editor/collab. Keeping it is harmless.
+      setStatus("Finishing transcription…");
+      // Sink stays installed until the final transcript arrives; cleared on
+      // leaving the editor/collab.
       return;
     }
-    // Collab uses stop-mode only. Live mode writes to the private editor and
-    // bypasses the sink, so turn it off before starting.
-    if (els.liveToggle && els.liveToggle.checked) {
-      els.liveToggle.checked = false;
-      els.liveToggle.dispatchEvent(new Event("change", { bubbles: true }));
-    }
+
+    // Start. The bridge forces stop-mode internally, so the private Live toggle
+    // doesn't interfere. Show "Stop" optimistically, then confirm from the result.
     installSink();
     els.postEditor.focus();
     restoreSavedRange();
-    vc.start();
-    els.postRecordBtn.classList.add("recording");
-    els.postRecordBtn.textContent = "Stop";
+    capturing = true;
+    setRecordBtn(true);
+    setStatus("Recording… click Stop when done.");
     resetIdleTimer();
+
+    let started = false;
+    try {
+      started = await vc.start();
+    } catch {
+      started = false;
+    }
+    if (!started) {
+      // Could not start (mic denied, model failed, or already busy): revert.
+      capturing = false;
+      setRecordBtn(false);
+      releaseSink();
+      setStatus("Couldn't start recording. Check microphone access.", "error");
+    }
+  }
+
+  function setRecordBtn(on) {
+    if (!els.postRecordBtn) return;
+    els.postRecordBtn.classList.toggle("recording", on);
+    els.postRecordBtn.textContent = on ? "Stop" : "Record";
   }
 
   if (els.postRecordBtn)

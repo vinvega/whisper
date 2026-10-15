@@ -1471,11 +1471,26 @@ document.addEventListener("keydown", (e) => {
 // controlled via window.__transcriptSink (see appendText). Collab uses stop-mode
 // capture (sink receives the final transcript) to keep things simple.
 window.__voiceCapture = {
-  start() {
-    if (!recording && !startingRecording && !stopping) startRecording();
+  // Start recording in STOP-MODE regardless of the private Live toggle, since the
+  // collab sink only receives the final transcript (live mode writes to the
+  // private editor and bypasses the sink). Returns a promise that resolves true
+  // once recording has actually begun, false if it couldn't start.
+  async start() {
+    if (recording || startingRecording || stopping) return false;
+    // Force stop-mode for this capture without disturbing the user's saved Live
+    // preference: remember it, turn it off at the state level, restore on stop.
+    this._liveWasOn = liveMode;
+    liveMode = false;
+    await startRecording();
+    return recording === true;
   },
   stop() {
     if (recording) stopRecording();
+    // Restore the user's Live preference once we've asked to stop.
+    if (this._liveWasOn !== undefined) {
+      liveMode = this._liveWasOn;
+      this._liveWasOn = undefined;
+    }
   },
   isRecording() {
     return recording;
